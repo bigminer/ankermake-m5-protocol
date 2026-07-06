@@ -1,0 +1,56 @@
+{% import "macro.html" as macro -%}
+<!DOCTYPE html>
+<html data-bs-theme="dark" lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta content="width=device-width, initial-scale=1" name="viewport" />
+        <title>ankerctl - Login</title>
+        <link rel="icon" href="{{ url_for('static', filename='img/logo.svg') }}">
+        {{ macro.static_css("vendor/bootstrap-5.3.0-alpha3-dist/css/bootstrap.min.css") }}
+        {{ macro.static_css("vendor/bootstrap-icons-1.10.5/font/bootstrap-icons.min.css") }}
+        {{ macro.static_css("ankersrv.css") }}
+    </head>
+    <body>
+        <div class="container" style="max-width: 24rem;">
+            <div class="text-center my-4">
+                <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="logo" height="48">
+            </div>
+
+            <div class="container text-center" id="messages">
+                {% for category, message in get_flashed_messages(with_categories=true) %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    <button type="button" class="btn-close btn-sm btn-close-white"
+                            data-bs-dismiss="alert" aria-label="Close"></button>
+                    {{ message }}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="card">
+                <div class="card-header">Access token required</div>
+                <div class="card-body">
+                    <form method="post">
+                        <input type="hidden" name="next" value="{{ next_url }}" />
+                        <div class="input-group">
+                            <div class="input-group-text">
+                                {{ macro.bi_icon("key-fill") }}
+                            </div>
+                            <input
+                                type="password"
+                                name="token"
+                                class="form-control"
+                                placeholder="Token"
+                                autofocus
+                                required
+                            />
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 mt-3">
+                            {{ macro.bi_icon("box-arrow-in-right", "Log in") }}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {{ macro.static_script("vendor/bootstrap-5.3.0-alpha3-dist/js/bootstrap.bundle.min.js") }}
+    </body>
+</html>

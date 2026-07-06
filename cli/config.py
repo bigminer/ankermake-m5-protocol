@@ -163,6 +163,10 @@ def import_config_from_server(config, login_data, insecure):
 
     # prepare to rescue any printer IP addresses already configured
     printer_ips = get_printer_ips(config)
+    webcam_url = get_webcam_url(config)
+
+    if webcam_url:
+        cfg.webcam_url = webcam_url
 
     # save config to json file named `ankerctl/default.json`
     config.save("default", cfg)
@@ -180,6 +184,14 @@ def get_printer_ips(config):
         printer_ips = {}
 
     return printer_ips
+
+
+def get_webcam_url(config):
+    try:
+        with config.open() as cfg:
+            return cfg.webcam_url
+    except KeyError:
+        return ""
 
 
 def update_empty_printer_ips(config, printer_ips):
@@ -225,11 +237,15 @@ def update_printer_ip_addresses(config, printer_ips: list) -> list:
 def attempt_config_upgrade(config, profile, insecure):
     path = config.config_path("default")
     data = json.load(path.open())
+    webcam_url = data.get("webcam_url", "")
     cfg = load_config_from_api(
         data["account"]["auth_token"],
         data["account"]["region"],
         insecure
     )
+
+    if webcam_url:
+        cfg.webcam_url = webcam_url
 
     # save config to json file named `ankerctl/default.json`
     config.save("default", cfg)

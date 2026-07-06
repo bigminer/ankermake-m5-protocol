@@ -133,6 +133,9 @@ Follow the instructions for a [git install](documentation/install-from-git.md) (
  > If your `login.json` file was not automatically found, you’ll be prompted to upload your `login.json` file and the given the default path it should be found in your corresponding Operating System. 
    Once the `login.json` has been uploaded, the page will refresh and the web interface is usable.
 
+ > **Optional**
+ > Set `ANKERCTL_TOKEN` before starting the webserver to require a shared login token for the human web UI. The OctoPrint-compatible slicer endpoints (`/api/version` and `/api/files/local`) stay reachable without the token so Orca/PrusaSlicer "Send and Print" continues to work.
+
 ### Printing Directly from PrusaSlicer
 
 ankerctl can allow slicers like PrusaSlicer (and its derivatives) to send print jobs to the printer using the slicer’s built in communications tools. The web server must be running in order to send jobs to the printer. 

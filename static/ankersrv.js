@@ -181,6 +181,31 @@ $(function () {
         return `X${speed / 50}`;
     }
 
+    function setText(selectors, value) {
+        selectors.forEach(function (selector) {
+            $(selector).text(value);
+        });
+    }
+
+    function setDisabled(selectors, disabled) {
+        selectors.forEach(function (selector) {
+            const elem = $(selector).get(0);
+            if (elem) {
+                elem.disabled = disabled;
+            }
+        });
+    }
+
+    function getPrinterState(data) {
+        const keys = ["state", "status", "print_state", "printState", "machineStatus", "currentStatus"];
+        for (const key of keys) {
+            if (Object.prototype.hasOwnProperty.call(data, key)) {
+                return `${data[key]}`;
+            }
+        }
+        return null;
+    }
+
     /**
      * Updates the country code <select> element
      */
@@ -340,13 +365,15 @@ $(function () {
         badge: "#badge-mqtt",
 
         opened: function (event) {
-            ["#set-nozzle-temp", "#set-bed-temp"].forEach(function (elem_id) {
-                $(elem_id)[0].disabled = false;
-            });
+            setDisabled(["#set-nozzle-temp", "#set-bed-temp"], false);
         },
 
         message: function (ev) {
             const data = JSON.parse(ev.data);
+            const state = getPrinterState(data);
+            if (state !== null) {
+                setText(["#control-printer-state"], state);
+            }
             if (data.commandType == 1001) {
                 // Returns Print Details
                 $("#print-name").text(data.name);
@@ -355,35 +382,49 @@ $(function () {
                 const progress = getPercentage(data.progress);
                 $("#progressbar").attr("aria-valuenow", progress);
                 $("#progressbar").attr("style", `width: ${progress}%`);
-                $("#progress").text(`${progress}%`);
+                setText(["#progress", "#control-progress"], `${progress}%`);
+                // Control tab: object preview (printer-provided image URL) + overlay
+                if (data.img) {
+                    if ($("#control-preview-img").attr("src") !== data.img) {
+                        $("#control-preview-img").attr("src", data.img);
+                    }
+                    $("#control-preview-name").text(data.name || "");
+                    $("#control-preview-wrap").show();
+                }
+                $("#control-preview-bar")
+                    .text(`${progress}%`)
+                    .attr("aria-valuenow", progress)
+                    .attr("style", `width: ${progress}%`);
             } else if (data.commandType == 1003) {
                 // Returns Nozzle Temp
                 const current = getTemp(data.currentTemp);
-                $("#nozzle-temp").text(`${current}°C`);
+                setText(["#nozzle-temp", "#control-nozzle-current"], `${current}°C`);
                 if (Object.prototype.hasOwnProperty.call(data, "targetTemp")) {
                     const target = getTemp(data.targetTemp);
                     if (!isNaN(target)) {
-                        $("#set-nozzle-temp").text(`${target}°C`);
+                        setText(["#set-nozzle-temp", "#control-nozzle-target"], `${target}°C`);
+                        $("#control-nozzle-input").val(target);
                     }
                 }
             } else if (data.commandType == 1004) {
                 // Returns Bed Temp
                 const current = getTemp(data.currentTemp);
-                $("#bed-temp").text(`${current}°C`);
+                setText(["#bed-temp", "#control-bed-current"], `${current}°C`);
                 if (Object.prototype.hasOwnProperty.call(data, "targetTemp")) {
                     const target = getTemp(data.targetTemp);
                     if (!isNaN(target)) {
-                        $("#set-bed-temp").text(`${target}°C`);
+                        setText(["#set-bed-temp", "#control-bed-target"], `${target}°C`);
+                        $("#control-bed-input").val(target);
                     }
                 }
             } else if (data.commandType == 1006) {
                 // Returns Print Speed
                 const X = getSpeedFactor(data.value);
-                $("#print-speed").text(`${data.value}mm/s ${X}`);
+                setText(["#print-speed", "#control-print-speed"], `${data.value}mm/s ${X}`);
             } else if (data.commandType == 1052) {
                 // Returns Layer Info
                 const layer = `${data.real_print_layer} / ${data.total_layer}`;
-                $("#print-layer").text(layer);
+                setText(["#print-layer", "#control-layer"], layer);
             } else {
                 console.log("Unhandled mqtt message:", data);
             }
@@ -395,17 +436,15 @@ $(function () {
             $("#time-remain").text("00:00:00");
             $("#progressbar").attr("aria-valuenow", 0);
             $("#progressbar").attr("style", "width: 0%");
-            $("#progress").text("0%");
-            $("#nozzle-temp").text("0°C");
-            $("#set-nozzle-temp").text("0°C");
-            $("#bed-temp").text("0°C");
-            $("#set-bed-temp").text("0°C");
-            $("#print-speed").text("0mm/s");
-            $("#print-layer").text("0 / 0");
-
-            ["#set-nozzle-temp", "#set-bed-temp"].forEach(function (elem_id) {
-                $(elem_id).get(0).disabled = true;
-            });
+            setText(["#progress", "#control-progress"], "0%");
+            setText(["#nozzle-temp", "#control-nozzle-current"], "0°C");
+            setText(["#set-nozzle-temp", "#control-nozzle-target"], "0°C");
+            setText(["#bed-temp", "#control-bed-current"], "0°C");
+            setText(["#set-bed-temp", "#control-bed-target"], "0°C");
+            setText(["#print-speed", "#control-print-speed"], "0mm/s");
+            setText(["#print-layer", "#control-layer"], "0 / 0");
+            setText(["#control-printer-state"], "Disconnected");
+            setDisabled(["#set-nozzle-temp", "#set-bed-temp"], true);
         },
     });
 
@@ -453,8 +492,29 @@ $(function () {
 
     sockets.ctrl = new AutoWebSocket({
         name: "Control socket",
-        url: `${location.protocol.replace('http','ws')}${location.host}/ws/ctrl`,
+        url: `${location.protocol.replace('http','ws')}//${location.host}/ws/ctrl`,
         badge: "#badge-ctrl",
+
+        opened: function () {
+            $(".control-command").prop("disabled", false);
+        },
+
+        message: function (event) {
+            const data = JSON.parse(event.data);
+            if (Object.prototype.hasOwnProperty.call(data, "mqttReply")) {
+                if (data.mqttReply && Object.prototype.hasOwnProperty.call(data.mqttReply, "resData")) {
+                    appendGcodeLog(`< ${data.mqttReply.resData}`);
+                } else if (data.mqttReply) {
+                    appendGcodeLog(`< ${JSON.stringify(data.mqttReply)}`);
+                } else {
+                    appendGcodeLog("< No response");
+                }
+            }
+        },
+
+        close: function () {
+            $(".control-command").prop("disabled", true);
+        },
     });
 
     sockets.pppp_state = new AutoWebSocket({
@@ -617,5 +677,122 @@ $(function () {
             sockets.ctrl.ws.send(JSON.stringify({ mqtt: message_data }));
         }
     }
+
+    /**
+     * Control tab
+     *
+     * Sends printer commands over the /ws/ctrl websocket. Movement, fan and
+     * temperature actions use raw GCode (GCODE_COMMAND), which is a well-known
+     * primitive. Pause/resume/stop use PRINT_CONTROL, whose value encoding is
+     * not yet confirmed (see TODO below).
+     */
+    function ctrlReady() {
+        return sockets.ctrl && sockets.ctrl.ws && sockets.ctrl.is_open;
+    }
+
+    function appendGcodeLog(line) {
+        const logElem = $("#gcode-log");
+        if (!logElem.length) {
+            return;
+        }
+        logElem.append(document.createTextNode(`${line}\n`));
+        logElem.get(0).scrollTop = logElem.get(0).scrollHeight;
+    }
+
+    function sendMqtt(message_data, awaitResponse = false) {
+        if (!ctrlReady()) {
+            flash_message("Control socket not connected", "warning");
+            return;
+        }
+        sockets.ctrl.ws.send(JSON.stringify({
+            mqtt: message_data,
+            awaitResponse: awaitResponse,
+        }));
+    }
+
+    function sendGcode(line, awaitResponse = false) {
+        sendMqtt({
+            commandType: MqttMsgType.ZZ_MQTT_CMD_GCODE_COMMAND,
+            cmdData: line,
+            cmdLen: line.length,
+        }, awaitResponse);
+        appendGcodeLog(`> ${line}`);
+    }
+
+    // Pause / Resume / Stop.
+    // TODO verify PRINT_CONTROL values (1=pause, 2=resume, 3=stop are best-guess
+    // and unconfirmed against the M5/M5C firmware).
+    $("#print-pause").on("click", function () {
+        sendMqtt({ commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL, value: 1 });
+        return false;
+    });
+    $("#print-resume").on("click", function () {
+        sendMqtt({ commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL, value: 2 });
+        return false;
+    });
+    $("#print-stop").on("click", function () {
+        if (window.confirm("Stop the current print?")) {
+            sendMqtt({ commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL, value: 3 });
+        }
+        return false;
+    });
+
+    // Part fan (0-100% -> M106 S0-255, 0 -> M107)
+    $("#fan-slider").on("input", function () {
+        $("#fan-value").text(`${this.value}%`);
+    });
+    $("#fan-apply").on("click", function () {
+        const pct = parseInt($("#fan-slider").val());
+        if (pct <= 0) {
+            sendGcode("M107");
+        } else {
+            sendGcode(`M106 S${Math.round(pct * 255 / 100)}`);
+        }
+        return false;
+    });
+
+    // Jog + home (relative moves)
+    $(".jog-btn").on("click", function () {
+        const axis = $(this).data("axis");
+        const dir = parseInt($(this).data("dir"));
+        const step = parseFloat($("#jog-step").val()) * dir;
+        const feed = (axis === "Z") ? 600 : 3000;
+        sendGcode(`G91;G1 ${axis}${step} F${feed};G90`);
+        return false;
+    });
+    $("#jog-home").on("click", function () {
+        sendGcode("G28");
+        return false;
+    });
+
+    $("#control-nozzle-form").on("submit", function (event) {
+        event.preventDefault();
+        const target = parseInt($("#control-nozzle-input").val());
+        if (!isNaN(target)) {
+            sendGcode(`M104 S${target}`);
+        }
+        return false;
+    });
+
+    $("#control-bed-form").on("submit", function (event) {
+        event.preventDefault();
+        const target = parseInt($("#control-bed-input").val());
+        if (!isNaN(target)) {
+            sendGcode(`M140 S${target}`);
+        }
+        return false;
+    });
+
+    // GCode terminal
+    $("#gcode-form").on("submit", function (event) {
+        event.preventDefault();
+        const input = $("#gcode-input");
+        const line = input.val().trim();
+        if (line) {
+            sendGcode(line, true);
+            input.val("");
+        }
+        return false;
+    });
 
 });
