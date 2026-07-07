@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pyflakes
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+      - name: Lint (pyflakes, fail on undefined names)
+        run: |
+          python -m pyflakes ankerctl.py cli/*.py web/*.py web/service/*.py web/lib/*.py > pyflakes.txt || true
+          cat pyflakes.txt
+          ! grep -q "undefined name" pyflakes.txt

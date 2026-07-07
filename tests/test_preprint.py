@@ -1,0 +1,166 @@
+import contextlib
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from web import util
+
+
+class FakeClient:
+    def __init__(self, replies=None):
+        self.commands = []
+        self.replies = list(replies or [])
+        self._mqtt = SimpleNamespace(disconnect=lambda: None)
+
+    def command(self, payload):
+        self.commands.append(payload["cmdData"])
+
+    def fetch(self, timeout):
+        if self.replies:
+            reply = self.replies.pop(0)
+        else:
+            reply = {"commandType": util._GCODE_COMMAND, "reply": 0, "resData": "ok"}
+        return [(None, [reply])]
+
+
+class FakeFileTransfer:
+    def __init__(self):
+        self.data = None
+        self.filename = None
+        self.user_name = None
+
+    def send_file(self, upload, user_name):
+        self.data = upload.read()
+        self.filename = upload.filename
+        self.user_name = user_name
+
+
+class FakeServiceManager:
+    def __init__(self, filetransfer):
+        self.filetransfer = filetransfer
+
+    @contextlib.contextmanager
+    def borrow(self, name):
+        assert name == "filetransfer"
+        yield self.filetransfer
+
+
+class PreprintTests(unittest.TestCase):
+    def test_extracts_resolved_temperatures(self):
+        data = b"M104 S150\nM190 S55\nM109 S220\nG28\n"
+        self.assertEqual(util.extract_preprint_temperatures(data), (55, 220))
+
+    def test_rejects_unresolved_or_unsafe_temperatures(self):
+        with self.assertRaisesRegex(ValueError, "could not find M190"):
+            util.extract_preprint_temperatures(
+                b"M190 S{first_layer_bed_temperature[0]}\nM109 S220\n"
+            )
+        with self.assertRaisesRegex(ValueError, "unsafe M109"):
+            util.extract_preprint_temperatures(b"M190 S55\nM109 S500\n")
+
+    def test_runs_preprint_before_preserving_upload(self):
+        client = FakeClient(
+            replies=[
+                {"commandType": util._GCODE_COMMAND, "reply": 0, "resData": "ok"},
+                {"commandType": util._GCODE_COMMAND, "reply": 0, "resData": "ok"},
+                {"commandType": util._BED_TEMPERATURE, "currentTemp": 5500},
+                {"commandType": util._GCODE_COMMAND, "reply": 0, "resData": "ok"},
+                {"commandType": util._NOZZLE_TEMPERATURE, "currentTemp": 22000},
+                {"commandType": util._GCODE_COMMAND, "reply": 0, "resData": "ok"},
+            ]
+        )
+        filetransfer = FakeFileTransfer()
+        app = SimpleNamespace(
+            config={
+                "config": object(),
+                "printer_index": 0,
+                "insecure": False,
+                "preprint_command_timeout": 300,
+            },
+            svc=FakeServiceManager(filetransfer),
+        )
+        data = b"M190 S55\nM109 S220\nG28\n"
+
+        util._PREPRINT_LOCK.acquire()
+        with patch("web.util.cli.mqtt.mqtt_open", return_value=client):
+            util._run_preprint_upload(
+                app,
+                data,
+                "test.gcode",
+                "OrcaSlicer",
+                55,
+                220,
+            )
+
+        self.assertEqual(
+            client.commands,
+            [
+                "M104 S150",
+                "M400",
+                "M140 S55",
+                "M400",
+                "M104 S220",
+                "M400",
+                "G36",
+                "M400",
+            ],
+        )
+        self.assertEqual(filetransfer.data, data)
+        self.assertEqual(filetransfer.filename, "test.gcode")
+        self.assertEqual(filetransfer.user_name, "OrcaSlicer")
+        self.assertFalse(util._PREPRINT_LOCK.locked())
+
+    def test_failure_cools_down_and_does_not_upload(self):
+        client = FakeClient(
+            replies=[
+                {"commandType": util._GCODE_COMMAND, "reply": 0, "resData": "ok"},
+                {
+                    "commandType": util._GCODE_COMMAND,
+                    "reply": 1,
+                    "resData": "Error: heating failed",
+                },
+                {"commandType": util._GCODE_COMMAND, "reply": 0, "resData": "ok"},
+                {"commandType": util._GCODE_COMMAND, "reply": 0, "resData": "ok"},
+            ]
+        )
+        filetransfer = FakeFileTransfer()
+        app = SimpleNamespace(
+            config={
+                "config": object(),
+                "printer_index": 0,
+                "insecure": False,
+                "preprint_command_timeout": 300,
+            },
+            svc=FakeServiceManager(filetransfer),
+        )
+
+        util._PREPRINT_LOCK.acquire()
+        with patch("web.util.cli.mqtt.mqtt_open", return_value=client):
+            util._run_preprint_upload(
+                app,
+                b"data",
+                "test.gcode",
+                "OrcaSlicer",
+                55,
+                220,
+            )
+
+        self.assertEqual(
+            client.commands,
+            [
+                "M104 S150",
+                "M400",
+                "M140 S55",
+                "M400",
+                "M104 S0",
+                "M400",
+                "M140 S0",
+                "M400",
+            ],
+        )
+        self.assertIsNone(filetransfer.data)
+        self.assertFalse(util._PREPRINT_LOCK.locked())
+
+
+if __name__ == "__main__":
+    unittest.main()

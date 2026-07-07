@@ -2,6 +2,7 @@ import uuid
 import logging as log
 
 from multiprocessing import Queue
+from queue import Empty
 
 from ..lib.service import Service
 from .. import app
@@ -13,14 +14,22 @@ import cli.mqtt
 import cli.util
 
 
+FILE_TRANSFER_ACK_TIMEOUT = 15
+
+
 class FileTransferService(Service):
 
     def api_aabb(self, api, frametype, msg=b"", pos=0):
-        api.send_aabb(msg, frametype=frametype, pos=pos)
+        api.send_aabb(msg, frametype=frametype, pos=pos, timeout=FILE_TRANSFER_ACK_TIMEOUT)
 
     def api_aabb_request(self, api, frametype, msg=b"", pos=0):
         self.api_aabb(api, frametype, msg, pos)
-        resp = self._tap.get()
+        try:
+            resp = self._tap.get(timeout=FILE_TRANSFER_ACK_TIMEOUT)
+        except Empty as exc:
+            raise ConnectionError(
+                f"Timed out waiting for file-transfer acknowledgement at offset {pos}"
+            ) from exc
         log.debug(f"{self.name}: Aabb response: {resp}")
 
     def send_file(self, fd, user_name):
@@ -34,7 +43,8 @@ class FileTransferService(Service):
         log.info(f"Going to upload {fui.size} bytes as {fui.name!r}")
         try:
             log.info("Requesting file transfer..")
-            api.send_xzyh(str(uuid.uuid4())[:16].encode(), cmd=P2PCmdType.P2P_SEND_FILE)
+            api.send_xzyh(str(uuid.uuid4())[:16].encode(), cmd=P2PCmdType.P2P_SEND_FILE,
+                          timeout=FILE_TRANSFER_ACK_TIMEOUT)
 
             log.info("Sending file metadata..")
             self.api_aabb(api, FileTransfer.BEGIN, bytes(fui) + b"\x00")
@@ -49,6 +59,10 @@ class FileTransferService(Service):
             self.api_aabb_request(api, FileTransfer.END)
         except PPPPError as E:
             log.error(f"Could not send print job: {E}")
+            raise ConnectionError(f"Printer rejected print job: {E}") from E
+        except TimeoutError as E:
+            log.error(f"File transfer stalled: {E}")
+            raise ConnectionError(f"File transfer stalled: {E}") from E
         else:
             log.info("Successfully sent print job")
 

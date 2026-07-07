@@ -1,7 +1,6 @@
 import json
+import time
 import logging as log
-
-from datetime import datetime, timedelta
 
 from ..lib.service import Service, ServiceRestartSignal, ServiceStoppedError
 from .. import app
@@ -29,8 +28,6 @@ class PPPPService(Service):
     def worker_start(self):
         config = app.config["config"]
 
-        deadline = datetime.now() + timedelta(seconds=2)
-
         with config.open() as cfg:
             if not cfg:
                 raise ServiceStoppedError("No config available")
@@ -50,12 +47,20 @@ class PPPPService(Service):
 
         api.connect_lan_search()
 
-        while api.state != PPPPState.Connected:
-            try:
-                msg = api.recv(timeout=(deadline - datetime.now()).total_seconds())
+        # close the socket on any failure to connect, since the service will
+        # retry worker_start with a fresh api instance (avoids leaking one
+        # socket per retry while the printer is unreachable)
+        try:
+            deadline = time.monotonic() + 2
+            while api.state != PPPPState.Connected:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Timed out waiting for printer to answer lan search")
+                msg = api.recv(timeout=remaining)
                 api.process(msg)
-            except StopIteration:
-                raise ConnectionRefusedError("Connection rejected by device")
+        except Exception:
+            api.close()
+            raise
 
         log.info(f"Successfully connected to printer {printer.name} ({printer.p2p_duid}) over pppp using ip {printer.ip_addr}")
         log.info("Established pppp connection")
@@ -112,8 +117,13 @@ class PPPPService(Service):
                 raise ValueError(f"Unexpected data in stream: {data!r}")
 
     def worker_stop(self):
-        self._api.send(PktClose())
-        del self._api
+        try:
+            self._api.send(PktClose())
+        except Exception as E:
+            log.warning(f"{self.name}: Failed to send close packet ({E})")
+        finally:
+            self._api.close()
+            del self._api
 
     @property
     def connected(self):

@@ -26,4 +26,8 @@ class MqttQueue(Service):
                 self.notify(obj)
 
     def worker_stop(self):
+        try:
+            self.client.disconnect()
+        except Exception as E:
+            log.warning(f"{self.name}: Failed to disconnect mqtt client ({E})")
         del self.client

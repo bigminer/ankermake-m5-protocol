@@ -156,6 +156,38 @@
                     </div>
                 </form>
 
+                <form
+                    action="{{ url_for('app_api_ankerctl_config_webcam') }}"
+                    method="POST"
+                    class="mb-3"
+                    id="config-webcam-form"
+                >
+                    <div class="card">
+                        <div class="card-header fs-4">
+                            External Webcam URL
+                        </div>
+                        <div class="card-body">
+                            <div class="input-group">
+                                <div class="input-group-text">URL</div>
+                                <input
+                                    class="form-control"
+                                    type="url"
+                                    id="webcamUrl"
+                                    name="webcam_url"
+                                    placeholder="http://camera.local:8080/video"
+                                    value="{{ webcam_url }}"
+                                />
+                                <button class="btn btn-secondary submit" type="submit">
+                                    {{ macro.bi_icon("camera-video", "Save") }}
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            Leave blank to hide the embedded webcam on the Control tab.
+                        </div>
+                    </div>
+                </form>
+
                 <div class="card">
                     <div class="card">
                         <div class="card-header fs-4">

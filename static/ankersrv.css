@@ -85,6 +85,15 @@ code {
 
 /* Layout */
 
+header .nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+
+header .nav-item {
+    flex: 0 0 auto;
+}
+
 #printProgress {
     height: 40px;
 }
@@ -136,4 +145,33 @@ body.fullscreen-emulate-active {
 
 .fullscreen-emulate-d-none-active {
     display: none;
+}
+
+.control-panel .card {
+    height: 100%;
+}
+
+.control-stat-label {
+    color: var(--bs-secondary-color);
+    font-size: 0.875rem;
+}
+
+.control-stat-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.control-webcam {
+    aspect-ratio: 4 / 3;
+    object-fit: contain;
+}
+
+@media (max-width: 767.98px) {
+    .control-panel {
+        padding-bottom: 1rem;
+    }
+
+    .control-stat-value {
+        font-size: 1rem;
+    }
 }

@@ -77,6 +77,7 @@ class Account(Serialize):
 class Config(Serialize):
     account: Account
     printers: list[Printer]
+    webcam_url: str=""
 
     def __bool__(self):
         return bool(self.account)

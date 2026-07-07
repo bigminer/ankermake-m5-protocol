@@ -440,6 +440,7 @@ def config_login(env, country, email, password):
                                                      captcha_id=captcha["id"], captcha_answer=captcha["answer"])
             break
         except libflagship.httpapi.APIError as E:
+            login_error = E
             # check if the error is actually a request to solve a captcha
             if E.json and "data" in E.json:
                 data = E.json["data"]
@@ -458,7 +459,7 @@ def config_login(env, country, email, password):
                 log.critical(f"Cannot open webbrowser for displaying captcha, aborting.")
                 tries = 0
         else:
-            log.critical(f"Unknown login error: {E}")
+            log.critical(f"Unknown login error: {login_error}")
             tries = 0
 
     if login:

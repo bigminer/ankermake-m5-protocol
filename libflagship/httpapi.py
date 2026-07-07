@@ -147,7 +147,6 @@ class AnkerHTTPPassportApiV2(AnkerHTTPApi):
         if captcha_answer is not None:
             data["answer"] = captcha_answer
 
-        print(f"data = {data}")
         # perform the request
         return self._post("/login", headers=headers, data=data)
 
