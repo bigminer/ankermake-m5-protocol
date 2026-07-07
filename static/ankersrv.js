@@ -681,10 +681,11 @@ $(function () {
     /**
      * Control tab
      *
-     * Sends printer commands over the /ws/ctrl websocket. Movement, fan and
-     * temperature actions use raw GCode (GCODE_COMMAND), which is a well-known
-     * primitive. Pause/resume/stop use PRINT_CONTROL, whose value encoding is
-     * not yet confirmed (see TODO below).
+     * Sends printer commands over the /ws/ctrl websocket as raw GCode
+     * (GCODE_COMMAND). Pause/resume/stop use Anker's out-of-band commands
+     * M2022/M2023/M2024, handled directly by the serial parser in the M5C
+     * Marlin firmware (queue.cpp ak_gcode_parse, eufymake/eufyMake-Marlin-M5C)
+     * so they take effect even while the print buffer is full.
      */
     function ctrlReady() {
         return sockets.ctrl && sockets.ctrl.ws && sockets.ctrl.is_open;
@@ -719,20 +720,18 @@ $(function () {
         appendGcodeLog(`> ${line}`);
     }
 
-    // Pause / Resume / Stop.
-    // TODO verify PRINT_CONTROL values (1=pause, 2=resume, 3=stop are best-guess
-    // and unconfirmed against the M5/M5C firmware).
+    // Pause / Resume / Stop (M2022/M2023/M2024, see comment above)
     $("#print-pause").on("click", function () {
-        sendMqtt({ commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL, value: 1 });
+        sendGcode("M2022");
         return false;
     });
     $("#print-resume").on("click", function () {
-        sendMqtt({ commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL, value: 2 });
+        sendGcode("M2023");
         return false;
     });
     $("#print-stop").on("click", function () {
         if (window.confirm("Stop the current print?")) {
-            sendMqtt({ commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL, value: 3 });
+            sendGcode("M2024");
         }
         return false;
     });

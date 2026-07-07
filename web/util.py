@@ -14,9 +14,12 @@ _PREPRINT_LOCK = Lock()
 _GCODE_COMMAND = MqttMsgType.ZZ_MQTT_CMD_GCODE_COMMAND.value
 _NOZZLE_TEMPERATURE = MqttMsgType.ZZ_MQTT_CMD_NOZZLE_TEMP.value
 _BED_TEMPERATURE = MqttMsgType.ZZ_MQTT_CMD_HOTBED_TEMP.value
+# Limits derived from the M5C (V8110) Marlin firmware Configuration.h:
+# BED_MAXTEMP 125 / HEATER_0_MAXTEMP 325, minus Marlin's standard
+# BED_OVERSHOOT (10) / HOTEND_OVERSHOOT (15) target clamps.
 _TEMPERATURE_LIMITS = {
-    "M190": (1, 130),
-    "M109": (150, 320),
+    "M190": (1, 115),
+    "M109": (150, 310),
 }
 
 
@@ -136,7 +139,7 @@ def _wait_for_temperature(client, command_type, target, tolerance, timeout):
 
 def _disconnect_mqtt(client):
     try:
-        client._mqtt.disconnect()
+        client.disconnect()
     except Exception:
         log.exception("Pre-print hook: failed to disconnect MQTT client")
 
