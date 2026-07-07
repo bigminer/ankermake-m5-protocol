@@ -67,7 +67,12 @@ class BaseConfigManager:
         return json.load(path.open(), object_hook=self._load_json)
 
     def save(self, name, value):
+        # config holds account auth token and mqtt credentials: keep it
+        # readable by the owner only (mode is applied before the secrets are
+        # written, and corrects pre-existing files created world-readable)
         path = self.config_path(name)
+        path.touch(mode=0o600, exist_ok=True)
+        path.chmod(0o600)
         path.write_text(json.dumps(value, default=self._save_json, indent=2) + "\n")
 
 
