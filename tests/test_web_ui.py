@@ -3,7 +3,6 @@ import io
 import json
 import unittest
 from datetime import datetime
-from types import SimpleNamespace
 from unittest import mock
 
 from cli.model import Account, Config, Printer
@@ -165,10 +164,6 @@ class WebUiTestCase(unittest.TestCase):
         app.config["access_token"] = ""
 
         fake_client = mock.Mock()
-        fake_client.await_response.return_value = {
-            "commandType": 0x0413,
-            "resData": "ok",
-        }
         fake_socket = FakeSocket([])
         message = {
             "mqtt": {
@@ -179,10 +174,32 @@ class WebUiTestCase(unittest.TestCase):
             "awaitResponse": True,
         }
 
+        handlers = []
+
+        class FakeMqttService:
+            client = fake_client
+
+            @contextlib.contextmanager
+            def tap(self, handler):
+                handlers.append(handler)
+                try:
+                    yield self
+                finally:
+                    handlers.remove(handler)
+
+        def deliver(cmd):
+            # replies arrive via the service notify stream; include an
+            # unrelated status message to exercise the reply filter
+            for handler in handlers:
+                handler({"commandType": 1003, "currentTemp": 21000})
+                handler({"commandType": 0x0413, "resData": "ok"})
+
+        fake_client.command.side_effect = deliver
+
         @contextlib.contextmanager
         def fake_borrow(name):
             self.assertEqual(name, "mqttqueue")
-            yield SimpleNamespace(client=fake_client)
+            yield FakeMqttService()
 
         with mock.patch.object(app.svc, "borrow", fake_borrow):
             ctrl_send_mqtt(fake_socket, message)
@@ -192,8 +209,8 @@ class WebUiTestCase(unittest.TestCase):
             "cmdData": "M104 S60",
             "cmdLen": 8,
         })
-        fake_client.await_response.assert_called_once_with(0x0413)
         self.assertEqual(json.loads(fake_socket.sent[0])["mqttReply"]["resData"], "ok")
+        self.assertEqual(handlers, [])
 
 
 if __name__ == "__main__":

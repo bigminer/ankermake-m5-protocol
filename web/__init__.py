@@ -29,9 +29,11 @@ Services:
 import hmac
 import os
 import json
+import time
 import logging as log
 
 from datetime import datetime
+from queue import Empty, Queue
 from secrets import token_urlsafe as token
 from urllib.parse import urlsplit
 from flask import Flask, flash, request, render_template, Response, session, url_for, jsonify, redirect
@@ -170,14 +172,46 @@ import web.service.filetransfer
 PRINTERS_WITHOUT_CAMERA = ["V8110"]
 
 
+CTRL_MQTT_REPLY_TIMEOUT = 10
+
+
 def ctrl_send_mqtt(sock, msg):
+    """
+    Send an mqtt command from a websocket request. Replies are collected via
+    the service's notify stream instead of the client's own await_response(),
+    so the MqttQueue service thread remains the only caller of the paho
+    network loop (which is not thread-safe), and messages arriving while we
+    wait still reach every other subscriber.
+    """
+    command_type = msg["mqtt"]["commandType"]
+
     with app.svc.borrow("mqttqueue") as mq:
-        mq.client.command(msg["mqtt"])
-        if msg.get("awaitResponse"):
-            sock.send(json.dumps({
-                "commandType": msg["mqtt"]["commandType"],
-                "mqttReply": mq.client.await_response(msg["mqtt"]["commandType"]),
-            }))
+        if not msg.get("awaitResponse"):
+            mq.client.command(msg["mqtt"])
+            return
+
+        replies = Queue()
+        with mq.tap(replies.put):
+            mq.client.command(msg["mqtt"])
+
+            reply = None
+            deadline = time.monotonic() + CTRL_MQTT_REPLY_TIMEOUT
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    obj = replies.get(timeout=remaining)
+                except Empty:
+                    break
+                if obj.get("commandType") == command_type:
+                    reply = obj
+                    break
+
+        sock.send(json.dumps({
+            "commandType": command_type,
+            "mqttReply": reply,
+        }))
 
 
 @sock.route("/ws/mqtt")
