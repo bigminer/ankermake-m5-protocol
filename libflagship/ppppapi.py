@@ -1,4 +1,5 @@
 import os
+import time
 import socket
 import string
 import hashlib
@@ -182,8 +183,8 @@ class Channel:
         # the returned chunks will be (re)transmitted
         return res
 
-    def wait(self):
-        self.event.wait()
+    def wait(self, timeout=None):
+        self.event.wait(timeout=timeout)
         self.event.clear()
 
     def peek(self, nbytes, timeout=None):
@@ -192,7 +193,7 @@ class Channel:
     def read(self, nbytes, timeout=None):
         return self.rx.read(nbytes, timeout)
 
-    def write(self, payload, block=True):
+    def write(self, payload, block=True, timeout=None):
         pdata = payload[:]
 
         tx_ctr_start = self.tx_ctr
@@ -207,13 +208,20 @@ class Channel:
 
         tx_ctr_done = self.tx_ctr
 
+        ack_deadline = (time.monotonic() + timeout) if timeout else None
+
         while block:
             # if doing a blocking write, loop on self.event until we have
             # received acknowledgment of our data
-            self.wait()
+            self.wait(timeout=0.5)
 
             if self.tx_ack >= tx_ctr_done:
                 break
+
+            if ack_deadline and time.monotonic() > ack_deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for transmission ack on channel {self.index}"
+                )
 
         return (tx_ctr_start, tx_ctr_done)
 
@@ -368,7 +376,7 @@ class AnkerPPPPBaseApi(Thread):
         log.debug(f"TX  --> {str(msg)[:128]}")
         self.sock.sendto(resp, addr or self.addr)
 
-    def send_xzyh(self, data, cmd, chan=0, unk0=0, unk1=0, sign_code=0, unk3=0, dev_type=0, block=True):
+    def send_xzyh(self, data, cmd, chan=0, unk0=0, unk1=0, sign_code=0, unk3=0, dev_type=0, block=True, timeout=None):
         xzyh = Xzyh(
             cmd=cmd,
             len=len(data),
@@ -381,9 +389,9 @@ class AnkerPPPPBaseApi(Thread):
             dev_type=dev_type
         )
 
-        return self.chans[chan].write(xzyh.pack(), block=block)
+        return self.chans[chan].write(xzyh.pack(), block=block, timeout=timeout)
 
-    def send_aabb(self, data, sn=0, pos=0, frametype=0, chan=1, block=True):
+    def send_aabb(self, data, sn=0, pos=0, frametype=0, chan=1, block=True, timeout=None):
         aabb = Aabb(
             frametype=frametype,
             sn=sn,
@@ -391,7 +399,7 @@ class AnkerPPPPBaseApi(Thread):
             len=len(data)
         )
 
-        return self.chans[chan].write(aabb.pack_with_crc(data), block=block)
+        return self.chans[chan].write(aabb.pack_with_crc(data), block=block, timeout=timeout)
 
 
 class AnkerPPPPApi(AnkerPPPPBaseApi):
