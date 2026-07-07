@@ -158,8 +158,10 @@ def import_config_from_server(config, login_data, insecure):
     except APIError as E:
         log.critical(f"Config import failed: {E} "
                      "(auth token might be expired: make sure Ankermake Slicer can connect, then try again)")
+        raise
     except Exception as E:
         log.critical(f"Config import failed: {E}")
+        raise
 
     # prepare to rescue any printer IP addresses already configured
     printer_ips = get_printer_ips(config)
