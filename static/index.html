@@ -8,6 +8,7 @@
 {% block contents %}
     {% if configure %}
         {% include "tabs/home.html" %}
+        {% include "tabs/control.html" %}
         {% include "tabs/instructions.html" %}
         {% include "tabs/print.html" %}
     {% endif %}
@@ -19,6 +20,10 @@
     {% if configure %}
         {% call macro.menu_button(id="home-tab", target="home", active=configure) %}
             {{ macro.bi_icon("house", "Live") }}
+        {% endcall %}
+
+        {% call macro.menu_button(id="control-tab", target="control") %}
+            {{ macro.bi_icon("sliders", "Control") }}
         {% endcall %}
 
         {% call macro.menu_button(id="print-tab", target="print") %}

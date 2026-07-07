@@ -23,6 +23,13 @@
                         {{ macro.bi_icon("fullscreen") }}
                     </button>
                 </div>
+                {% elif webcam_url %}
+                <!-- External webcam (e.g. MediaMTX WebRTC / MJPEG) -->
+                <iframe src="{{ webcam_url }}"
+                        class="w-100 d-block rounded-3 bg-body-tertiary"
+                        style="border: 0; aspect-ratio: 16 / 9;"
+                        allow="autoplay; fullscreen"
+                        title="Webcam stream" id="webcam-frame-live"></iframe>
                 {% else %}
                 <div class="card">
                     <div class="card-body text-center">

@@ -1,0 +1,208 @@
+<div
+    class="tab-pane fade"
+    id="control"
+    role="tabpanel"
+    aria-labelledby="control-tab"
+>
+    <div class="container fullscreen-emulate control-panel">
+        <div class="row g-3">
+            <div class="col-12 col-xl-6" id="control-preview-wrap" style="display: none;">
+                <div class="card">
+                    <div class="card-header fs-6">Preview</div>
+                    <div class="card-body text-center">
+                        <img id="control-preview-img"
+                             class="d-block rounded-3 bg-body-tertiary mx-auto mb-2"
+                             style="max-height: 16rem; max-width: 100%;"
+                             alt="Print preview">
+                        <div id="control-preview-name" class="small text-truncate mb-1"></div>
+                        <div class="progress">
+                            <div id="control-preview-bar"
+                                 class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                                 aria-valuenow="0" style="width: 0%">0%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header fs-6">Status</div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-6 col-lg-4">
+                                <div class="control-stat-label">Nozzle</div>
+                                <div class="control-stat-value">
+                                    <span id="control-nozzle-current">0°C</span>
+                                    <span class="text-body-secondary">/</span>
+                                    <span id="control-nozzle-target">0°C</span>
+                                </div>
+                            </div>
+                            <div class="col-6 col-lg-4">
+                                <div class="control-stat-label">Bed</div>
+                                <div class="control-stat-value">
+                                    <span id="control-bed-current">0°C</span>
+                                    <span class="text-body-secondary">/</span>
+                                    <span id="control-bed-target">0°C</span>
+                                </div>
+                            </div>
+                            <div class="col-6 col-lg-4">
+                                <div class="control-stat-label">Progress</div>
+                                <div class="control-stat-value" id="control-progress">0%</div>
+                            </div>
+                            <div class="col-6 col-lg-4">
+                                <div class="control-stat-label">Layer</div>
+                                <div class="control-stat-value" id="control-layer">0 / 0</div>
+                            </div>
+                            <div class="col-6 col-lg-4">
+                                <div class="control-stat-label">State</div>
+                                <div class="control-stat-value" id="control-printer-state">Unknown</div>
+                            </div>
+                            <div class="col-6 col-lg-4">
+                                <div class="control-stat-label">Speed</div>
+                                <div class="control-stat-value" id="control-print-speed">0mm/s</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {% if webcam_url %}
+            <div class="col-12 col-xl-6">
+                <div class="card">
+                    <div class="card-header fs-6">Webcam</div>
+                    <div class="card-body">
+                        <iframe src="{{ webcam_url }}"
+                                class="w-100 d-block rounded-3 bg-body-tertiary control-webcam"
+                                style="border: 0; aspect-ratio: 16 / 9;"
+                                allow="autoplay; fullscreen"
+                                title="Webcam stream" id="webcam-frame"></iframe>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="col-12 col-xl-6">
+                <div class="card mb-3">
+                    <div class="card-header fs-6">Print</div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-4">
+                                <button class="w-100 btn btn-secondary control-command" id="print-pause" type="button" disabled>
+                                    {{ macro.bi_icon("pause-fill", "Pause") }}
+                                </button>
+                            </div>
+                            <div class="col-4">
+                                <button class="w-100 btn btn-secondary control-command" id="print-resume" type="button" disabled>
+                                    {{ macro.bi_icon("play-fill", "Resume") }}
+                                </button>
+                            </div>
+                            <div class="col-4">
+                                <button class="w-100 btn btn-danger control-command" id="print-stop" type="button" disabled>
+                                    {{ macro.bi_icon("stop-fill", "Stop") }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header fs-6">Temperatures</div>
+                    <div class="card-body">
+                        <form class="mb-3" id="control-nozzle-form">
+                            <label class="form-label" for="control-nozzle-input">Nozzle target</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" min="0" max="300" id="control-nozzle-input" value="0" />
+                                <span class="input-group-text">°C</span>
+                                <button class="btn btn-primary control-command" type="submit" disabled>Set</button>
+                            </div>
+                        </form>
+
+                        <form id="control-bed-form">
+                            <label class="form-label" for="control-bed-input">Bed target</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" min="0" max="120" id="control-bed-input" value="0" />
+                                <span class="input-group-text">°C</span>
+                                <button class="btn btn-primary control-command" type="submit" disabled>Set</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header fs-6">Part Fan</div>
+                    <div class="card-body">
+                        <div class="d-flex align-items-center gap-3">
+                            <input type="range" class="form-range" min="0" max="100" step="5"
+                                   value="0" id="fan-slider">
+                            <span id="fan-value" class="text-nowrap">0%</span>
+                        </div>
+                        <button class="btn btn-secondary w-100 mt-3 control-command" id="fan-apply" type="button" disabled>
+                            {{ macro.bi_icon("fan", "Set Fan") }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-xl-6">
+                <div class="card mb-3">
+                    <div class="card-header fs-6">Move</div>
+                    <div class="card-body">
+                        <div class="row g-2 mb-3">
+                            <div class="col-4">
+                                <label class="form-label small mb-1">Step (mm)</label>
+                                <select class="form-select" id="jog-step">
+                                    <option value="0.1">0.1</option>
+                                    <option value="1">1</option>
+                                    <option value="10" selected>10</option>
+                                    <option value="50">50</option>
+                                </select>
+                            </div>
+                            <div class="col-8 d-flex align-items-end">
+                                <button class="w-100 btn btn-secondary control-command" id="jog-home" type="button" disabled>
+                                    {{ macro.bi_icon("house-fill", "Home All") }}
+                                </button>
+                            </div>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-4">
+                                <button class="w-100 btn btn-secondary jog-btn control-command" data-axis="X" data-dir="-1" type="button" disabled>X-</button>
+                            </div>
+                            <div class="col-4">
+                                <button class="w-100 btn btn-secondary jog-btn control-command" data-axis="X" data-dir="1" type="button" disabled>X+</button>
+                            </div>
+                            <div class="col-4">
+                                <button class="w-100 btn btn-secondary jog-btn control-command" data-axis="Z" data-dir="1" type="button" disabled>Z+</button>
+                            </div>
+                            <div class="col-4">
+                                <button class="w-100 btn btn-secondary jog-btn control-command" data-axis="Y" data-dir="-1" type="button" disabled>Y-</button>
+                            </div>
+                            <div class="col-4">
+                                <button class="w-100 btn btn-secondary jog-btn control-command" data-axis="Y" data-dir="1" type="button" disabled>Y+</button>
+                            </div>
+                            <div class="col-4">
+                                <button class="w-100 btn btn-secondary jog-btn control-command" data-axis="Z" data-dir="-1" type="button" disabled>Z-</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-xl-6">
+                <div class="card">
+                    <div class="card-header fs-6">GCode Terminal</div>
+                    <div class="card-body">
+                        <form id="gcode-form">
+                            <div class="input-group mb-2">
+                                <input type="text" class="form-control font-monospace" id="gcode-input"
+                                       placeholder="e.g. M104 S200" autocomplete="off">
+                                <button class="btn btn-primary control-command" type="submit" disabled>Send</button>
+                            </div>
+                        </form>
+                        <pre id="gcode-log" class="bg-body-tertiary rounded-3 p-2 mb-0 small"
+                             style="height: 10rem; overflow-y: auto;"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

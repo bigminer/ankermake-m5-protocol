@@ -26,12 +26,15 @@ Services:
     - util: Houses utility services for use in the web module
     - config: Handles configuration manipulation for ankerctl
 """
+import hmac
+import os
 import json
 import logging as log
 
 from datetime import datetime
 from secrets import token_urlsafe as token
-from flask import Flask, flash, request, render_template, Response, session, url_for, jsonify
+from urllib.parse import urlsplit
+from flask import Flask, flash, request, render_template, Response, session, url_for, jsonify, redirect
 from flask_sock import Sock
 from user_agents import parse as user_agent_parse
 
@@ -49,12 +52,111 @@ import cli.countrycodes
 
 
 app = Flask(__name__, root_path=ROOT_DIR, static_folder="static", template_folder="static")
-# secret_key is required for flash() to function
-app.secret_key = token(24)
+# secret_key is required for flash() to function.
+# ANKERCTL_SECRET_KEY keeps login sessions valid across restarts; otherwise a
+# fresh random key is generated (and users must re-login after a restart).
+app.secret_key = os.environ.get("ANKERCTL_SECRET_KEY") or token(24)
 app.config.from_prefixed_env()
+
+# Optional shared-secret access token. When set, the human web UI requires
+# login; when empty, auth is disabled (preserving previous behaviour). The
+# slicer/OctoPrint upload endpoints are always exempt (see _require_token).
+app.config["access_token"] = os.environ.get("ANKERCTL_TOKEN", "")
+
+# Optional external webcam stream URL (e.g. MJPEG from a phone/USB cam),
+# embedded on the Control tab. Empty = hidden.
+app.config["webcam_url"] = os.environ.get("ANKERCTL_WEBCAM_URL", "")
+
+# When enabled, Orca uploads are held while ankerctl preheats the printer and
+# invokes the M5C firmware's G36 preparation routine over MQTT. G36 is sent
+# out-of-band because the printer rejects it when embedded in uploaded G-code.
+app.config["preprint_g36"] = os.environ.get(
+    "ANKERCTL_PREPRINT_G36", ""
+).lower() in {"1", "true", "yes", "on"}
+app.config["preprint_command_timeout"] = int(
+    os.environ.get("ANKERCTL_PREPRINT_COMMAND_TIMEOUT", "300")
+)
+
 app.svc = ServiceManager()
 
 sock = Sock(app)
+
+
+# Paths always reachable without a login token: the OctoPrint upload API used
+# by slicers (Orca/PrusaSlicer), version probe, the login page itself, and
+# static assets needed to render it.
+AUTH_EXEMPT_EXACT = {"/api/version", "/login"}
+AUTH_EXEMPT_PREFIX = ("/static/", "/api/files/local")
+
+
+def _auth_enabled():
+    return bool(app.config.get("access_token"))
+
+
+def _auth_is_valid():
+    if not _auth_enabled():
+        return True
+    return bool(session.get("authed"))
+
+
+def _auth_safe_next():
+    if request.query_string:
+        return request.full_path.removesuffix("?")
+    return request.path
+
+
+def _auth_safe_redirect_target(target):
+    if not target:
+        return url_for("app_root")
+    parts = urlsplit(target)
+    if parts.scheme or parts.netloc or not target.startswith("/"):
+        return url_for("app_root")
+    return target
+
+
+@app.before_request
+def _require_token():
+    """
+    Gate the web UI behind a shared token when ANKERCTL_TOKEN is set. Slicer
+    upload endpoints stay open so 'Send and Print' keeps working without auth.
+    """
+    required = app.config.get("access_token")
+    if not required:
+        return
+
+    path = request.path
+    if path in AUTH_EXEMPT_EXACT or path.startswith(AUTH_EXEMPT_PREFIX):
+        return
+
+    if _auth_is_valid():
+        return
+
+    # Websocket handshakes can't follow a redirect; reject outright.
+    if path.startswith("/ws/"):
+        return "Unauthorized", 401
+
+    return redirect(url_for("app_login", next=_auth_safe_next()))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def app_login():
+    """
+    Minimal token login. Sets a session cookie on success. If no token is
+    configured, auth is disabled and we redirect straight to the app.
+    """
+    required = app.config.get("access_token")
+    if not required:
+        return redirect(url_for("app_root"))
+
+    next_url = _auth_safe_redirect_target(request.values.get("next"))
+
+    if request.method == "POST":
+        if hmac.compare_digest(request.form.get("token", ""), required):
+            session["authed"] = True
+            return redirect(next_url)
+        flash("Invalid token", "danger")
+
+    return render_template("login.html", next_url=next_url)
 
 
 # autopep8: off
@@ -68,11 +170,23 @@ import web.service.filetransfer
 PRINTERS_WITHOUT_CAMERA = ["V8110"]
 
 
+def ctrl_send_mqtt(sock, msg):
+    with app.svc.borrow("mqttqueue") as mq:
+        mq.client.command(msg["mqtt"])
+        if msg.get("awaitResponse"):
+            sock.send(json.dumps({
+                "commandType": msg["mqtt"]["commandType"],
+                "mqttReply": mq.client.await_response(msg["mqtt"]["commandType"]),
+            }))
+
+
 @sock.route("/ws/mqtt")
 def mqtt(sock):
     """
     Handles receiving and sending messages on the 'mqttqueue' stream service through websocket
     """
+    if not _auth_is_valid():
+        return
     if not app.config["login"]:
         return
     for data in app.svc.stream("mqttqueue"):
@@ -85,6 +199,8 @@ def video(sock):
     """
     Handles receiving and sending messages on the 'videoqueue' stream service through websocket
     """
+    if not _auth_is_valid():
+        return
     if not app.config["login"] or not app.config["video_supported"]:
         return
     for msg in app.svc.stream("videoqueue"):
@@ -96,6 +212,8 @@ def pppp_state(sock):
     """
     Handles a status request for the 'pppp' stream service through websocket
     """
+    if not _auth_is_valid():
+        return
     if not app.config["login"]:
         return
 
@@ -125,6 +243,8 @@ def ctrl(sock):
     """
     Handles controlling of light and video quality through websocket
     """
+    if not _auth_is_valid():
+        return
     if not app.config["login"]:
         return
 
@@ -132,11 +252,13 @@ def ctrl(sock):
     sock.send(json.dumps({"ankerctl": 1}))
 
     while True:
-        msg = json.loads(sock.receive())
+        payload = sock.receive()
+        if payload is None:
+            return
+        msg = json.loads(payload)
 
         if "mqtt" in msg:
-            with app.svc.borrow("mqttqueue") as mq:
-                mq.client.command(msg["mqtt"])
+            ctrl_send_mqtt(sock, msg)
 
         if "light" in msg:
             with app.svc.borrow("videoqueue") as vq:
@@ -179,6 +301,7 @@ def app_root():
     with config.open() as cfg:
         user_agent = user_agent_parse(request.headers.get("User-Agent"))
         user_os = web.platform.os_platform(user_agent.os.family)
+        webcam_url = cfg.webcam_url or app.config["webcam_url"]
 
         if cfg:
             anker_config = str(web.config.config_show(cfg))
@@ -211,6 +334,7 @@ def app_root():
             config_existing_email=config_existing_email,
             country_codes=json.dumps(cli.countrycodes.country_codes),
             current_country=country,
+            webcam_url=webcam_url,
             printer=printer
         )
 
@@ -292,6 +416,15 @@ def app_api_ankerctl_config_upload():
     except Exception as err:
         log.exception(f"Config import failed: {err}")
         return web.util.flash_redirect(url_for('app_root'), f"Unexpected Error occurred: {err}", "danger")
+
+
+@app.post("/api/ankerctl/config/webcam")
+def app_api_ankerctl_config_webcam():
+    with app.config["config"].modify() as cfg:
+        cfg.webcam_url = request.form.get("webcam_url", "").strip()
+
+    message = "Webcam URL saved" if cfg.webcam_url else "Webcam URL cleared"
+    return web.util.flash_redirect(url_for('app_root'), message, "success")
 
 
 @app.post("/api/ankerctl/config/login")
