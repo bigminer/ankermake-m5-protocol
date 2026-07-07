@@ -58,6 +58,7 @@ class FileTransferService(Service):
             self.api_aabb_request(api, FileTransfer.END)
         except PPPPError as E:
             log.error(f"Could not send print job: {E}")
+            raise ConnectionError(f"Printer rejected print job: {E}") from E
         else:
             log.info("Successfully sent print job")
 
