@@ -50,6 +50,9 @@ Order of Operations for Success:
 
 Follow the instructions for a [git install](documentation/install-from-git.md) (recommended), or [docker install](documentation/install-from-docker.md).
 
+For the Mac mini deployment used with OrcaSlicer, Tailscale, and the iPad
+WebRTC camera, see the [local macOS printer service runbook](documentation/local-macos-service.md).
+
 ## Importing configuration
 
 1. Import your AnkerMake account data by opening a terminal window in the folder you placed ankerctl in and running the following command:
@@ -132,6 +135,9 @@ Follow the instructions for a [git install](documentation/install-from-git.md) (
  > **Important**
  > If your `login.json` file was not automatically found, you’ll be prompted to upload your `login.json` file and the given the default path it should be found in your corresponding Operating System. 
    Once the `login.json` has been uploaded, the page will refresh and the web interface is usable.
+
+ > **Optional**
+ > Set `ANKERCTL_TOKEN` before starting the webserver to require a shared login token for the human web UI. The OctoPrint-compatible slicer endpoints (`/api/version` and `/api/files/local`) stay reachable without the token so Orca/PrusaSlicer "Send and Print" continues to work.
 
 ### Printing Directly from PrusaSlicer
 
