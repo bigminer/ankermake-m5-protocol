@@ -80,6 +80,9 @@ class AnkerMQTTBaseClient:
 
         return cls(printersn, client, key)
 
+    def disconnect(self):
+        self._mqtt.disconnect()
+
     def connect(self, server, port=8789, timeout=60):
         self._mqtt.connect(server, port, timeout)
 

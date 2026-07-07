@@ -281,6 +281,9 @@ class AnkerPPPPBaseApi(Thread):
         self.running = False
         self.stopped.wait()
 
+    def close(self):
+        self.sock.close()
+
     def run(self):
         log.debug("Started pppp thread")
         while self.running:
