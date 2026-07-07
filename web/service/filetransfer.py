@@ -2,6 +2,7 @@ import uuid
 import logging as log
 
 from multiprocessing import Queue
+from queue import Empty
 
 from ..lib.service import Service
 from .. import app
@@ -13,6 +14,9 @@ import cli.mqtt
 import cli.util
 
 
+FILE_TRANSFER_ACK_TIMEOUT = 15
+
+
 class FileTransferService(Service):
 
     def api_aabb(self, api, frametype, msg=b"", pos=0):
@@ -20,7 +24,12 @@ class FileTransferService(Service):
 
     def api_aabb_request(self, api, frametype, msg=b"", pos=0):
         self.api_aabb(api, frametype, msg, pos)
-        resp = self._tap.get()
+        try:
+            resp = self._tap.get(timeout=FILE_TRANSFER_ACK_TIMEOUT)
+        except Empty as exc:
+            raise ConnectionError(
+                f"Timed out waiting for file-transfer acknowledgement at offset {pos}"
+            ) from exc
         log.debug(f"{self.name}: Aabb response: {resp}")
 
     def send_file(self, fd, user_name):
