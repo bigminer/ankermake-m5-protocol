@@ -133,9 +133,15 @@ Fix applied and validated 2026-07-10:
 
 Remaining:
 
-1. Learn the app's Pause/Resume `PRINT_CONTROL` values (the app uses local
-   PPPP when on the printer's LAN, so cloud MQTT capture only works when
-   the phone is off-LAN) and consider switching Pause/Resume to them.
+1. Learn the app's Pause/Resume `PRINT_CONTROL` values. Ruled out so far
+   (2026-07-10): cloud MQTT capture fails even with the phone off-LAN (the
+   app tunnels commands over the PPPP relay; only one stop reply was ever
+   seen on `/command/reply`), and probing `1008` with `value` 1, 2, and 3
+   over `/ws/ctrl` produced no observable effect on a live cold print
+   (bare `value` only; pause may need `userName`/`filePath` fields per the
+   upstream research notes). Next avenues: decompile the app, intercept
+   PPPP, or visually validate the existing `M2022`/`M2023` path on a
+   supervised print.
 2. Automate the supervised live test using `tests/fixtures/slow_safe.gcode`
    (cold slow motion; note buffered-delivery latency makes assertions slow)
    or a fast-move streaming fixture; assert state via 1000/subType 1 and
