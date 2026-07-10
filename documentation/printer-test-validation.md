@@ -139,9 +139,14 @@ Remaining:
    seen on `/command/reply`), and probing `1008` with `value` 1, 2, and 3
    over `/ws/ctrl` produced no observable effect on a live cold print
    (bare `value` only; pause may need `userName`/`filePath` fields per the
-   upstream research notes). Next avenues: decompile the app, intercept
-   PPPP, or visually validate the existing `M2022`/`M2023` path on a
-   supervised print.
+   upstream research notes). Next avenues: decompile the app or intercept
+   PPPP. Supervised validation (2026-07-10, fast-move streamed job):
+   `M2022`/`M2023` produced no visible pause/resume — during a
+   PPPP-streamed job the job stream saturates the serial pipe, so MQTT
+   G-code queues behind it (stop still works because `1008/0` cancels the
+   stream first, then `M2024` gets through). Treat the UI Pause/Resume
+   buttons as non-functional for streamed jobs until they are reworked;
+   they may act on onboard/app jobs, which is unvalidated.
 2. Automate the supervised live test using `tests/fixtures/slow_safe.gcode`
    (cold slow motion; note buffered-delivery latency makes assertions slow)
    or a fast-move streaming fixture; assert state via 1000/subType 1 and
