@@ -125,32 +125,46 @@ Fix applied and validated 2026-07-10:
   alone cannot cancel a streaming job. Validated live on a supervised
   streaming job: state 1 -> stop sent -> state 4 and head parked within
   ~25s (state notice granularity ~3s).
-- Pause/Resume remain `M2022`/`M2023`. Delivery caveat, observed live: MQTT
-  G-code shares the comm-module-to-MCU serial pipe behind flow control, so
-  a motion buffer full of very slow moves delays delivery by minutes. Real
-  prints drain fast, keeping latency low.
 - Browser payload test updated for the dual-path Stop.
+
+## Pause/Resume solved via PRINT_CONTROL (2026-07-10)
+
+`M2022`/`M2023` MQTT G-code does not pause an onboard job (the communication
+module owns job execution). Pause/Resume also go through
+`ZZ_MQTT_CMD_PRINT_CONTROL` (0x3f0 / 1008), but unlike Stop they must
+identify the job with `userName` and `filePath`:
+
+```json
+{"commandType": 1008, "value": 1, "userName": "...", "filePath": "<job>.gcode"}
+```
+
+- `value`: 1 = pause, 2 = resume, 0 = stop.
+- Confirmed live (2026-07-10): value=1 with `userName`+`filePath` paused the
+  print and parked the head at `X:-10 Y:200 Z:2` with a 0.8mm retract —
+  exactly the firmware pause routine (`anker_pause.cpp:240` enqueues
+  `G1 X-10 Y200 F9000`). This is distinct from home/center (`X:110 Y:110`),
+  ruling out a disguised stop. A new state value 2 also appeared after pause.
+- Bare `value` (no identity fields) is a no-op — that is why the earlier
+  1,2,3 probes did nothing.
+
+UI implementation: Pause/Resume send PRINT_CONTROL value 1/2; Stop sends
+value 0 plus `M2024`. `filePath` comes from print telemetry (1001 `name`);
+`userName` is hardcoded `"ankerctl"`.
+
+UNVERIFIED: whether the printer requires `userName` to match the job's
+original uploader. The one clean pause used a matching userName; a
+filePath-only retest was confounded by leftover pause state and inconclusive.
+If the match is strict, the UI buttons will only control jobs uploaded as
+`"ankerctl"` (not app-initiated or browser-uploaded jobs). Confirm with a
+clean supervised print: upload as userName X, pause with userName Y+filePath,
+check `M114` for the `X-10 Y200` park.
 
 Remaining:
 
-1. Learn the app's Pause/Resume `PRINT_CONTROL` values. Ruled out so far
-   (2026-07-10): cloud MQTT capture fails even with the phone off-LAN (the
-   app tunnels commands over the PPPP relay; only one stop reply was ever
-   seen on `/command/reply`), and probing `1008` with `value` 1, 2, and 3
-   over `/ws/ctrl` produced no observable effect on a live cold print
-   (bare `value` only; pause may need `userName`/`filePath` fields per the
-   upstream research notes). Next avenues: decompile the app or intercept
-   PPPP. Supervised validation (2026-07-10, fast-move streamed job):
-   `M2022`/`M2023` produced no visible pause/resume — during a
-   PPPP-streamed job the job stream saturates the serial pipe, so MQTT
-   G-code queues behind it (stop still works because `1008/0` cancels the
-   stream first, then `M2024` gets through). Treat the UI Pause/Resume
-   buttons as non-functional for streamed jobs until they are reworked;
-   they may act on onboard/app jobs, which is unvalidated.
-2. Automate the supervised live test using `tests/fixtures/slow_safe.gcode`
-   (cold slow motion; note buffered-delivery latency makes assertions slow)
-   or a fast-move streaming fixture; assert state via 1000/subType 1 and
-   `APP_QUERY_STATUS` 0x403.
+1. Resolve the `userName`-match question above.
+2. Automate the supervised live pause/resume/stop test using a fast-move
+   fixture (e.g. regenerate `stream_stop_test.gcode`); assert the pause park
+   via `M114` and state via 1000/subType 1.
 3. Surface command delivery in the UI: Stop must confirm the printer's
    reply, and a dead `/ws/ctrl` socket must be unmistakable.
 

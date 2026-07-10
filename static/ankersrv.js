@@ -359,6 +359,9 @@ $(function () {
      */
     sockets = {};
 
+    // Name of the running job, from print telemetry; used by PRINT_CONTROL.
+    let currentPrintFile = "";
+
     sockets.mqtt = new AutoWebSocket({
         name: "mqtt socket",
         url: `${location.protocol.replace('http','ws')}//${location.host}/ws/mqtt`,
@@ -376,6 +379,7 @@ $(function () {
             }
             if (data.commandType == 1001) {
                 // Returns Print Details
+                currentPrintFile = data.name || "";
                 $("#print-name").text(data.name);
                 $("#time-elapsed").text(getTime(data.totalTime));
                 $("#time-remain").text(getTime(data.time));
@@ -711,6 +715,18 @@ $(function () {
         }));
     }
 
+    // PRINT_CONTROL (0x3f0) identifies the running job by name, so it needs
+    // the current filePath from print telemetry (commandType 1001). value 1
+    // pauses (firmware parks at X-10 Y200), 2 resumes, 0 cancels the job.
+    function sendPrintControl(value) {
+        sendMqtt({
+            commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL,
+            value: value,
+            userName: "ankerctl",
+            filePath: currentPrintFile,
+        });
+    }
+
     function sendGcode(line, awaitResponse = false) {
         sendMqtt({
             commandType: MqttMsgType.ZZ_MQTT_CMD_GCODE_COMMAND,
@@ -720,25 +736,23 @@ $(function () {
         appendGcodeLog(`> ${line}`);
     }
 
-    // Pause / Resume (M2022/M2023, see comment above). Delivery shares the
-    // gcode serial pipe to the MCU, so a full motion buffer delays them.
+    // Pause / Resume use PRINT_CONTROL (job-aware) rather than M2022/M2023;
+    // the M-code path does not act on an onboard job whose stream the
+    // communication module owns.
     $("#print-pause").on("click", function () {
-        sendGcode("M2022");
+        sendPrintControl(1);
         return false;
     });
     $("#print-resume").on("click", function () {
-        sendGcode("M2023");
+        sendPrintControl(2);
         return false;
     });
     // Stop needs both paths: PRINT_CONTROL value=0 cancels the job on the
-    // communication module (which owns streaming; M2024 alone cannot cancel
-    // it), and M2024 clears the MCU queue and stops motion already buffered.
+    // communication module (M2024 alone cannot cancel it), and M2024 clears
+    // the MCU queue and stops motion already buffered.
     $("#print-stop").on("click", function () {
         if (window.confirm("Stop the current print?")) {
-            sendMqtt({
-                commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL,
-                value: 0,
-            });
+            sendPrintControl(0);
             sendGcode("M2024");
         }
         return false;

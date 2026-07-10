@@ -214,6 +214,15 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     page.wait_for_function("!document.querySelector('#print-pause').disabled")
     page.on("dialog", lambda dialog: dialog.accept())
 
+    # A running job supplies the filePath that PRINT_CONTROL needs.
+    page.evaluate(
+        """
+        window.__wsInstances
+            .find((ws) => ws.url.includes("/ws/mqtt"))
+            .emit({commandType: 1001, name: "job.gcode"});
+        """
+    )
+
     page.click("#print-pause")
     page.click("#print-resume")
     page.click("#print-stop")
@@ -237,11 +246,9 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     page.fill("#gcode-input", "M105")
     page.press("#gcode-input", "Enter")
 
-    # Stop sends job-cancel (PRINT_CONTROL value=0) before M2024; it has no
-    # cmdData so it is asserted separately below.
+    # Pause/Resume are PRINT_CONTROL now, and Stop's PRINT_CONTROL precedes
+    # M2024; none carry cmdData, so they are asserted separately below.
     assert _commands(page) == [
-        {"cmdData": "M2022", "awaitResponse": False},
-        {"cmdData": "M2023", "awaitResponse": False},
         {"cmdData": "M2024", "awaitResponse": False},
         {"cmdData": "M107", "awaitResponse": False},
         {"cmdData": "M106 S128", "awaitResponse": False},
@@ -257,10 +264,21 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
         {"cmdData": "M105", "awaitResponse": True},
     ]
 
-    assert {
-        "mqtt": {"commandType": 0x03F0, "value": 0},
-        "awaitResponse": False,
-    } in _ctrl_frames(page)
+    def print_control(value):
+        return {
+            "mqtt": {
+                "commandType": 0x03F0,
+                "value": value,
+                "userName": "ankerctl",
+                "filePath": "job.gcode",
+            },
+            "awaitResponse": False,
+        }
+
+    frames = _ctrl_frames(page)
+    assert print_control(1) in frames  # pause
+    assert print_control(2) in frames  # resume
+    assert print_control(0) in frames  # stop
 
 
 def _ctrl_frames(page):
