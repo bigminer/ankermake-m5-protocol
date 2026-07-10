@@ -100,25 +100,38 @@ G36 tests validate only fixture rejection and hook dispatch, not leveling.
 Do not re-run the resolved-upload G36 test expecting completion until a
 firmware-level command contract is confirmed (serial console visibility).
 
-## Follow-up: live pause/resume/stop validation
+## Follow-up: fix UI pause/resume/stop (incident 2026-07-10)
 
-The UI Pause/Resume/Stop buttons are verified only up to payload delivery
-(browser tests assert `M2022`/`M2023`/`M2024` leave `/ws/ctrl`; unit tests
-assert forwarding to MQTT). Firmware behavior on the physical printer is
-unproven — these commands only act during a print, and `tiny_safe.gcode`
-finishes too quickly to pause.
+Incident: during an app-initiated print, the web UI Stop did not stop the
+job. Root cause, confirmed against the published firmware source and a live
+MQTT capture:
+
+- The UI sends `M2022`/`M2023`/`M2024` as MQTT G-code (0x0413). The Marlin
+  MCU honors them (`ak_gcode_parse` -> `anker_stop_deal`: clears queue,
+  quick-stops steppers, disables all heaters), but the M5C communication
+  module owns the job and keeps streaming G-code, so the print resumed with
+  heaters off (cold extrusion). These M-codes cannot cancel a job.
+- The correct job stop is `ZZ_MQTT_CMD_PRINT_CONTROL` (0x3f0 / 1008) with
+  `value: 0`, captured live from the eufyMake app: reply arrives on
+  `/command/reply` with `reply: 0`, and printer state (1000, subType 1)
+  flips 1 (printing) -> 0 (stopped). Pause/resume `value` codes are still
+  unknown — capture app presses the same way before implementing.
 
 Task:
 
-1. Add `tests/fixtures/slow_safe.gcode`: cold (M104 S0/M140 S0), no
-   extrusion, several minutes of slow XY moves after G28.
-2. Add a live test (markers `live_printer`, `print_job`, `motion`): upload
-   with `print=true`, wait for the printing state via telemetry
-   (`APP_QUERY_STATUS` 0x403 returns state/print details on demand), send
-   `M2022` and assert paused, `M2023` and assert printing, `M2024` and
-   assert stopped.
-3. Run supervised with the standard safety gates; same risk class as the
-   jog/home tests (cold, motion only).
+1. Change the UI Stop to send `{"commandType": 1008, "value": 0}` through
+   `/ws/ctrl` (`ctrl_send_mqtt` already forwards arbitrary commandTypes).
+2. Capture the app's Pause and Resume presses to learn their `value` codes;
+   update Pause/Resume buttons accordingly. Keep or drop the M2022/M2023
+   path deliberately (MCU-level pause may still be useful mid-buffer).
+3. Update the browser payload test, which currently asserts the broken
+   M2022/M2023/M2024 behavior.
+4. Add the live pause/resume/stop test: upload a new
+   `tests/fixtures/slow_safe.gcode` (cold, no extrusion, minutes of slow XY
+   moves), assert state transitions via telemetry (state 1000/subType 1,
+   `APP_QUERY_STATUS` 0x403 on demand), supervised with standard gates.
+5. Surface command delivery in the UI: Stop must confirm the printer's
+   reply, and a dead `/ws/ctrl` socket must be unmistakable.
 
 ## Expected Live Flow
 
