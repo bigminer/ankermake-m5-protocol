@@ -1,9 +1,13 @@
 import contextlib
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from web import util
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class FakeClient:
@@ -57,6 +61,24 @@ class PreprintTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "unsafe M109"):
             util.extract_preprint_temperatures(b"M190 S55\nM109 S500\n")
+
+    def test_fixture_temperatures_match_live_validation_assets(self):
+        self.assertEqual(
+            util.extract_preprint_temperatures(
+                (FIXTURES / "g36_resolved.gcode").read_bytes()
+            ),
+            (35, 150),
+        )
+
+        with self.assertRaisesRegex(ValueError, "could not find M190"):
+            util.extract_preprint_temperatures(
+                (FIXTURES / "preprint_unresolved.gcode").read_bytes()
+            )
+
+        with self.assertRaisesRegex(ValueError, "unsafe M109"):
+            util.extract_preprint_temperatures(
+                (FIXTURES / "preprint_unsafe_nozzle.gcode").read_bytes()
+            )
 
     def test_runs_preprint_before_preserving_upload(self):
         client = FakeClient(

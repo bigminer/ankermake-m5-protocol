@@ -120,6 +120,21 @@ To run ankerctl as an always-on service, see the
 worked example with OrcaSlicer, Tailscale, and an iPad as webcam) or use
 `docker compose up -d` on Linux.
 
+## ✅ Testing
+
+Safe local and CI tests exclude the live printer suite:
+
+```sh
+.venv/bin/python -m pytest tests/ -v -m "not live_printer"
+.venv/bin/python -m pyflakes ankerctl.py cli/*.py web/*.py web/service/*.py web/lib/*.py
+```
+
+Browser tests are marked `browser` and skip if Playwright or its Chromium
+runtime is not installed. Live printer tests are marked `live_printer` and are
+never enabled by default. The supervised workflow and required environment
+gates are documented in
+[Printer test validation](documentation/printer-test-validation.md).
+
 ## ⌨️ Command line
 
 ```sh
@@ -130,7 +145,7 @@ worked example with OrcaSlicer, Tailscale, and an iPad as webcam) or use
 ./ankerctl.py config show                      # show imported account/printer info
 ```
 
-Every command accepts `-h` for details; tests run with `python -m pytest tests/`.
+Every command accepts `-h` for details.
 
 ## 📚 Learn more
 

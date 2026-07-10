@@ -24,7 +24,7 @@ jobs:
           pip install pytest pyflakes
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -v -m "not live_printer"
 
       - name: Lint (pyflakes, fail on undefined names)
         run: |

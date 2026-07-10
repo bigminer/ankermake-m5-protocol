@@ -1,4 +1,7 @@
 -r requirements.txt
+pytest
+pyflakes
+playwright
 git+https://github.com/chrivers/transwarp.git
 pyinstaller
 make
