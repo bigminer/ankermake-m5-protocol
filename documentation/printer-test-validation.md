@@ -100,6 +100,26 @@ G36 tests validate only fixture rejection and hook dispatch, not leveling.
 Do not re-run the resolved-upload G36 test expecting completion until a
 firmware-level command contract is confirmed (serial console visibility).
 
+## Follow-up: live pause/resume/stop validation
+
+The UI Pause/Resume/Stop buttons are verified only up to payload delivery
+(browser tests assert `M2022`/`M2023`/`M2024` leave `/ws/ctrl`; unit tests
+assert forwarding to MQTT). Firmware behavior on the physical printer is
+unproven — these commands only act during a print, and `tiny_safe.gcode`
+finishes too quickly to pause.
+
+Task:
+
+1. Add `tests/fixtures/slow_safe.gcode`: cold (M104 S0/M140 S0), no
+   extrusion, several minutes of slow XY moves after G28.
+2. Add a live test (markers `live_printer`, `print_job`, `motion`): upload
+   with `print=true`, wait for the printing state via telemetry
+   (`APP_QUERY_STATUS` 0x403 returns state/print details on demand), send
+   `M2022` and assert paused, `M2023` and assert printing, `M2024` and
+   assert stopped.
+3. Run supervised with the standard safety gates; same risk class as the
+   jog/home tests (cold, motion only).
+
 ## Expected Live Flow
 
 1. Confirm the bed is clear, filament path is safe, and an operator is present
