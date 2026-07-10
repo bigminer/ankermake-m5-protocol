@@ -175,7 +175,7 @@ def _commands(page):
     return page.evaluate(
         """
         window.__wsSent
-            .filter((item) => item.payload.mqtt)
+            .filter((item) => item.payload.mqtt && item.payload.mqtt.cmdData !== undefined)
             .map((item) => ({
                 cmdData: item.payload.mqtt.cmdData,
                 awaitResponse: !!item.payload.awaitResponse,
@@ -237,6 +237,8 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     page.fill("#gcode-input", "M105")
     page.press("#gcode-input", "Enter")
 
+    # Stop sends job-cancel (PRINT_CONTROL value=0) before M2024; it has no
+    # cmdData so it is asserted separately below.
     assert _commands(page) == [
         {"cmdData": "M2022", "awaitResponse": False},
         {"cmdData": "M2023", "awaitResponse": False},
@@ -254,6 +256,11 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
         {"cmdData": "M140 S35", "awaitResponse": False},
         {"cmdData": "M105", "awaitResponse": True},
     ]
+
+    assert {
+        "mqtt": {"commandType": 0x03F0, "value": 0},
+        "awaitResponse": False,
+    } in _ctrl_frames(page)
 
 
 def _ctrl_frames(page):

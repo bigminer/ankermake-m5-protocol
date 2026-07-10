@@ -117,20 +117,30 @@ MQTT capture:
   flips 1 (printing) -> 0 (stopped). Pause/resume `value` codes are still
   unknown — capture app presses the same way before implementing.
 
-Task:
+Fix applied and validated 2026-07-10:
 
-1. Change the UI Stop to send `{"commandType": 1008, "value": 0}` through
-   `/ws/ctrl` (`ctrl_send_mqtt` already forwards arbitrary commandTypes).
-2. Capture the app's Pause and Resume presses to learn their `value` codes;
-   update Pause/Resume buttons accordingly. Keep or drop the M2022/M2023
-   path deliberately (MCU-level pause may still be useful mid-buffer).
-3. Update the browser payload test, which currently asserts the broken
-   M2022/M2023/M2024 behavior.
-4. Add the live pause/resume/stop test: upload a new
-   `tests/fixtures/slow_safe.gcode` (cold, no extrusion, minutes of slow XY
-   moves), assert state transitions via telemetry (state 1000/subType 1,
-   `APP_QUERY_STATUS` 0x403 on demand), supervised with standard gates.
-5. Surface command delivery in the UI: Stop must confirm the printer's
+- UI Stop now sends both `{"commandType": 1008, "value": 0}` (cancels the
+  job on the communication module) and `M2024` (clears buffered MCU motion).
+  Both are required: 1008 alone cannot stop already-buffered moves, M2024
+  alone cannot cancel a streaming job. Validated live on a supervised
+  streaming job: state 1 -> stop sent -> state 4 and head parked within
+  ~25s (state notice granularity ~3s).
+- Pause/Resume remain `M2022`/`M2023`. Delivery caveat, observed live: MQTT
+  G-code shares the comm-module-to-MCU serial pipe behind flow control, so
+  a motion buffer full of very slow moves delays delivery by minutes. Real
+  prints drain fast, keeping latency low.
+- Browser payload test updated for the dual-path Stop.
+
+Remaining:
+
+1. Learn the app's Pause/Resume `PRINT_CONTROL` values (the app uses local
+   PPPP when on the printer's LAN, so cloud MQTT capture only works when
+   the phone is off-LAN) and consider switching Pause/Resume to them.
+2. Automate the supervised live test using `tests/fixtures/slow_safe.gcode`
+   (cold slow motion; note buffered-delivery latency makes assertions slow)
+   or a fast-move streaming fixture; assert state via 1000/subType 1 and
+   `APP_QUERY_STATUS` 0x403.
+3. Surface command delivery in the UI: Stop must confirm the printer's
    reply, and a dead `/ws/ctrl` socket must be unmistakable.
 
 ## Expected Live Flow

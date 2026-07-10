@@ -720,7 +720,8 @@ $(function () {
         appendGcodeLog(`> ${line}`);
     }
 
-    // Pause / Resume / Stop (M2022/M2023/M2024, see comment above)
+    // Pause / Resume (M2022/M2023, see comment above). Delivery shares the
+    // gcode serial pipe to the MCU, so a full motion buffer delays them.
     $("#print-pause").on("click", function () {
         sendGcode("M2022");
         return false;
@@ -729,8 +730,15 @@ $(function () {
         sendGcode("M2023");
         return false;
     });
+    // Stop needs both paths: PRINT_CONTROL value=0 cancels the job on the
+    // communication module (which owns streaming; M2024 alone cannot cancel
+    // it), and M2024 clears the MCU queue and stops motion already buffered.
     $("#print-stop").on("click", function () {
         if (window.confirm("Stop the current print?")) {
+            sendMqtt({
+                commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL,
+                value: 0,
+            });
             sendGcode("M2024");
         }
         return false;
