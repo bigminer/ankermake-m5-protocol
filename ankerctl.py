@@ -313,6 +313,71 @@ def pppp_capture_video(env, file, max_size):
     log.info(f"Successfully captured {cli.util.pretty_size(size)} video stream into {file.name}")
 
 
+@pppp.command("query")
+@click.argument("command-type", required=True, metavar="<cmd>")
+@click.argument("args", type=cli.util.json_key_value, nargs=-1, metavar="[key=value] ...")
+@click.option("--listen", "-l", "listen_time", default=10.0, show_default=True,
+              help="Seconds to listen for reply traffic")
+@click.option("--force", "-f", default=False, is_flag=True, help="Allow dangerous commands")
+@pass_env
+def pppp_query(env, command_type, args, listen_time, force):
+    """
+    Send raw JSON command to printer over local pppp, and print reply traffic.
+
+    Research tool for mapping which commands the printer accepts on the LAN
+    P2P_JSON_CMD channel, without going through Anker's mqtt servers.
+
+    <cmd> is a number, a MqttMsgType name, or a P2PSubCmdType name.
+
+    BEWARE: This is intended for developers and experts only. Sending a
+    malformed command can crash your printer, or have other unintended side
+    effects.
+    """
+
+    try:
+        command_type = int(command_type)
+    except ValueError:
+        for enum in (MqttMsgType, P2PSubCmdType):
+            if command_type in enum.__members__:
+                command_type = int(enum[command_type])
+                break
+        else:
+            raise click.BadParameter(f"Unknown command type {command_type!r}")
+
+    cmd = {
+        "commandType": command_type,
+        **{key: value for (key, value) in args},
+    }
+
+    if not force:
+        if command_type == MqttMsgType.ZZ_MQTT_CMD_RECOVER_FACTORY.value:
+            log.fatal("Refusing to perform factory reset (override with --force)")
+            return
+
+        if command_type == MqttMsgType.ZZ_MQTT_CMD_DEVICE_NAME_SET.value and "devName" not in cmd:
+            log.fatal("Sending DEVICE_NAME_SET without devName=<name> will crash printer (override with --force)")
+            return
+
+    env.load_config()
+    api = cli.pppp.pppp_open(env.config, env.printer_index, timeout=10, dumpfile=env.pppp_dump)
+
+    try:
+        log.info(f"Sending P2P_JSON_CMD: {json.dumps(cmd)}")
+        try:
+            api.send_xzyh(json.dumps(cmd).encode(), cmd=P2PCmdType.P2P_JSON_CMD, timeout=5)
+        except TimeoutError:
+            log.error("No transport-level ack for command (printer did not acknowledge the data)")
+            return
+        log.info(f"Transport ack received. Listening for {listen_time:g}s..")
+        frames = cli.pppp.pppp_listen(api, duration=listen_time)
+        if frames:
+            log.info(f"Received {frames} frame(s)")
+        else:
+            log.warning("No reply traffic received")
+    finally:
+        api.stop()
+
+
 @main.group("http", help="Low-level http api access")
 def http(): pass
 
