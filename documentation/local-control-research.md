@@ -42,6 +42,56 @@ directory was also re-chmod'd to `0600`. Keep this backup offline; it contains
 credentials and must never be committed. Restore per
 [local-macos-service.md](local-macos-service.md).
 
+## Step 2 — Official app LAN capture: control is cloud-MQTT-only (done 2026-07-11)
+
+Question: does the official eufyMake app use any local channel to control the
+printer, or does it go through Anker's cloud? If a local control protocol
+exists, capturing the app would reveal it.
+
+### Method
+
+The eufyMake app was installed and run on the Mac mini itself, so its printer
+traffic originates from this host and a plain `tcpdump` captures it — no
+ARP-spoofing/MITM needed. Two operator-driven actions were captured live:
+an **extrude** and a full **10-minute auto-level**. During each:
+
+- `tcpdump -i en1 'host <printer> or port 8789'` recorded all Mac↔printer and
+  cloud-MQTT traffic (`examples/decode-pppp-pcap.py` decodes the PPPP side).
+- `ankerctl mqtt monitor` watched Anker cloud MQTT concurrently.
+- `lsof` snapshotted the app process's live sockets.
+
+### Result: the app never touches the printer locally
+
+The app process is `FDMPrint`. Across both actions, including throughout the
+10-minute auto-level:
+
+- `lsof` showed `FDMPrint` holding **only** two TCP sockets, both to
+  `make-mqtt.ankermake.com` (`166.117.17.78:8789`) — Anker cloud MQTT, the same
+  server and port `ankerctl` uses. **Zero** UDP sockets, **zero** connections
+  to the printer (`192.168.68.57`).
+- The packet capture confirmed it: the only Mac↔printer traffic was
+  `ankerctl`'s own PPPP keepalive session. Decoding the extrude-window pcap
+  yields **0 application frames** — just 118 `PktAlive`/`PktAliveAck` pairs from
+  `ankerctl`. The app contributed no local packets to the printer at all.
+- The commands and their telemetry appeared on **cloud MQTT**: the extrude as
+  `enter_or_quit_materiel` (0x3ff/1023) progressing 8→100 %, the auto-level as
+  `event_notify` state `subType 1 value 5` with a `print_schedule` countdown.
+  These are the same MQTT command/notice types `ankerctl` already speaks.
+
+### Interpretation — the strategic pivot
+
+There is **no local control protocol to discover.** The official app drives the
+printer entirely through Anker's cloud MQTT, using the command set `ankerctl`
+already implements. Locally, PPPP carries only camera/live and file upload.
+
+The useful consequence: `ankerctl` already has **full control parity** with the
+official app — it is simply equally cloud-dependent. Decoupling is therefore not
+a protocol-reverse-engineering problem; it is a *transport-redirection* problem.
+Everything (temps, motion, pause/resume/stop, extrude, leveling, G-code) is
+available the moment the printer's MQTT session can be pointed at a broker we
+control. That moves **"redirect the printer to a local MQTT broker"** from a
+speculative option to the highest-leverage next experiment (see ranking below).
+
 ## Step 3 — Read-only PPPP control/telemetry probe (done 2026-07-11)
 
 Question: can control and telemetry be driven over the existing local PPPP
@@ -117,36 +167,68 @@ a dead end.
 
 | Approach | Status | Risk |
 | --- | --- | --- |
-| PPPP-only control by reusing MQTT command types | **Disproven** (this probe) | Low |
-| Discover a real local control sub-protocol via official-app LAN capture | Unproven; next cheapest experiment | Low |
-| PPPP + stock-Marlin serial bridge (USB-UART sidecar) | Strongest durable path | Medium |
-| Redirect printer to a local MQTT broker | Low confidence without Linux root | Medium-high |
+| PPPP-only control by reusing MQTT command types | **Disproven** (Step 3 probe) | Low |
+| Discover a local control sub-protocol via official-app LAN capture | **Disproven** (Step 2: app is cloud-MQTT-only) | Low |
+| Redirect printer to a local MQTT broker | **Now the highest-leverage path** — ankerctl already has full control parity over MQTT; only the transport is cloud-bound. Feasibility hinges on the printer's TLS trust (test next). | Medium-high |
+| PPPP + stock-Marlin serial bridge (USB-UART sidecar) | Strongest *guaranteed* durable path; needs hardware | Medium |
 | Replace firmware (Klipper / custom Marlin) | Feasible, least mature | High |
+
+The two "reverse-engineer a local protocol" ideas are both closed off: there is
+no hidden local control channel (Step 2), and the generic PPPP JSON endpoint
+does not serve maker commands (Step 3). The remaining paths all keep the
+existing MQTT command set and change *where* the printer's MQTT session
+terminates (local broker) or *how* G-code reaches Marlin (serial bridge).
 
 ## Recommended next steps
 
-1. **Decouple the app from MQTT regardless of transport.** Introduce a
-   `PrinterTransport` interface (commands, queries, events, uploads) and have
-   the UI consume normalized printer state instead of `/ws/mqtt` directly. MQTT
-   becomes one implementation. Add manual/local config so an Anker account is
-   not required to run. This is useful under every route below and does not
-   depend on the probe outcome.
+1. **Test whether the printer will accept a redirected MQTT broker.** This is
+   now the pivotal experiment. The printer connects outbound to
+   `make-mqtt.ankermake.com:8789` over TLS. On a network where we control DNS
+   (the printer's LAN), override that name to a local broker and observe what
+   the printer requires:
+   - Does it validate the server certificate against Anker's CA / hostname, or
+     connect loosely? Stand up a local MQTT broker on `:8789`, first with the
+     existing `ssl/ankermake-mqtt.crt` chain, and watch whether the printer
+     completes the TLS handshake and subscribes to `/device/maker/<sn>/command`.
+   - If TLS is strict and needs Anker's private key (we don't have it), the
+     redirect requires firmware root to install our own CA — escalate to the
+     serial bridge instead. If the printer is lax, this yields full local
+     control with the command set `ankerctl` already implements.
+   - Do this read-only first: a broker that only logs subscribe/connect
+     attempts, before it ever publishes a command.
 
-2. **Capture the official eufyMake app's LOCAL (LAN) traffic** to the printer
-   during pause/resume/stop and a temperature change. If the app sends control
-   only to Anker's cloud MQTT (likely), that confirms there is no hidden local
-   control channel and the serial bridge is required. If it uses a PPPP
-   sub-protocol we have not mapped, capture the exact framing.
+2. **Decouple the app from MQTT behind a `PrinterTransport` interface**
+   (commands, queries, events, uploads) so the UI consumes normalized printer
+   state instead of `/ws/mqtt` directly, and add manual/local config so an
+   Anker account is not required to run. The cloud `AnkerMQTTClient` becomes one
+   implementation; a local broker (step 1) or serial bridge (step 3) slots in
+   behind the same interface. Useful under every route.
 
-3. **Prototype the serial G-code bridge** (Codex's strongest-durable path). The
-   official M5C Marlin source implements `M2022`/`M2023`/`M2024` and Anker's
-   packet framing between the Linux board and Marlin. A Pi/ESP32/USB-UART
-   sidecar could send G-code to stock Marlin, poll `M105`/`M114`/status, and
-   expose a local HTTP/WebSocket (or local MQTT) API. Passively identify the
-   UART with a logic analyzer first; never drive the same UART from two devices
-   at once.
+3. **Prototype the serial G-code bridge** as the guaranteed-durable fallback if
+   the broker redirect proves infeasible. The official M5C Marlin source
+   implements `M2022`/`M2023`/`M2024` and Anker's packet framing between the
+   Linux board and Marlin. A Pi/ESP32/USB-UART sidecar could send G-code to
+   stock Marlin, poll `M105`/`M114`/status, and expose a local HTTP/WebSocket
+   (or local MQTT) API. Passively identify the UART with a logic analyzer first;
+   never drive the same UART from two devices at once.
 
-## Reproducing the probe
+## Reproducing the probes
+
+### Step 2 — capture the official app (app runs on the same host)
+
+```sh
+# app process is FDMPrint; confirm where it connects (expect only cloud MQTT)
+lsof -nP -p "$(pgrep -x FDMPrint)" | grep -E 'TCP|UDP'
+
+# capture Mac<->printer and cloud MQTT while operating the app
+sudo tcpdump -i en1 -s0 -U -w /tmp/app.pcap 'host <printer-ip> or port 8789'
+.venv/bin/python ankerctl.py mqtt monitor        # concurrent cloud view
+
+# decode the local PPPP side (expect 0 application frames from the app)
+.venv/bin/python examples/decode-pppp-pcap.py /tmp/app.pcap --printer <printer-ip>
+```
+
+### Step 3 — read-only PPPP JSON probe
 
 ```sh
 # confirm printer idle
