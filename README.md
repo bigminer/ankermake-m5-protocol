@@ -6,12 +6,20 @@
 
 Keep using your AnkerMake M5 or M5C with only free and open-source software:
 slice in OrcaSlicer, hit print, and monitor and control the printer from a web
-dashboard — no AnkerMake slicer, no mobile app, no cloud dependency.
+dashboard — no AnkerMake slicer, no mobile app, and ultimately no Anker cloud.
+
+**Project target:** the printer and `ankerctl` communicate through a broker you
+run on your local network. Anker's MQTT service is replaced, not proxied: the
+printer can keep working with its cloud connection severed.
 
 ## ⚡ Highlights
 
 **New in this fork:**
 
+- 🏠 **Fully local MQTT is the target end state** — the proven M5C setup uses a
+  Mac-hosted, printer-only Wi-Fi network, local DNS, and Mosquitto so the
+  printer and `ankerctl` meet on your LAN instead of at Anker. PPPP remains the
+  direct LAN path for file transfer.
 - 🎛️ **Control tab** — pause/resume/stop, jog and home, nozzle/bed temperature
   targets, part-fan speed, and a live gcode terminal. Pause/resume/stop use
   `M2022`/`M2023`/`M2024`, verified against the published M5C firmware source
@@ -38,16 +46,33 @@ dashboard — no AnkerMake slicer, no mobile app, no cloud dependency.
 
 ## 🔍 Overview
 
-`ankerctl` talks to the printer directly over your LAN using the same
-protocols as Anker's own software (MQTT, PPPP, HTTPS), reverse-engineered by
-the [Ankermgmt community](https://github.com/Ankermgmt/ankermake-m5-protocol)
+`ankerctl` uses the same protocols as Anker's own software (MQTT, PPPP, HTTPS),
+reverse-engineered by the
+[Ankermgmt community](https://github.com/Ankermgmt/ankermake-m5-protocol)
 and — since Anker/eufyMake
 [published the printer's Marlin source](https://github.com/eufymake/eufyMake-Marlin-M5C) —
 verified against the actual firmware. Your AnkerMake account is needed once,
-to fetch the printer's connection keys; after that, everything is local.
+to fetch the printer's connection keys; after that, the supported local-broker
+configuration keeps printer control and telemetry on your network.
 
 This is a maintained fork of
 [Ankermgmt/ankermake-m5-protocol](https://github.com/Ankermgmt/ankermake-m5-protocol).
+
+## 🏠 Local MQTT: the intended end state
+
+The fully-local configuration replaces `make-mqtt.ankermake.com` with a local
+Mosquitto broker. The printer and `ankerctl` both resolve that name to the Mac,
+then exchange the existing encrypted MQTT messages locally. PPPP file transfer
+continues directly to the printer over the LAN. With the printer placed behind
+the Mac's Wi-Fi sharing/NAT network and Anker destinations blocked, the printer
+has no functional dependency on Anker's cloud.
+
+This has been verified on an M5C with a self-signed local broker certificate,
+live telemetry, a supervised home command, and an OrcaSlicer upload that
+completed and started a print. It is currently a documented macOS deployment,
+not a one-click cross-platform installer. See the [local-control research
+and runbook](documentation/local-control-research.md) for the network design,
+required `ankerctl` settings, and validation evidence.
 
 ## 🚀 Getting started
 
