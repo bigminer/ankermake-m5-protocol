@@ -207,6 +207,28 @@ are app-managed consumer mesh, changing the DNS handed to the printer is done in
 the **Deco app** (set custom DNS → `192.168.68.55`), which only the operator can
 do. Broker + `dnsmasq` setup on the Mac is automatable; the DNS switch is manual.
 
+### USB-C is not an open control path (verified 2026-07-12)
+
+Checked whether the printer's USB-C port could drive Marlin directly (which would
+make control fully local over a cable, with no network at all). It cannot:
+
+- Community tooling (OctoPrint / Mainsail / Fluidd / SimplyPrint) lists the M5C
+  as incompatible **specifically because it does not expose serial printing**.
+- The published firmware confirms why: the STM32F4 Marlin uses only hardware
+  UARTs — `SERIAL_PORT 1/2/3` = USART1/3/6 at 912600 / 1000000 / 115200 baud,
+  which are internal MCU↔Linux-module links — with **no USB CDC serial**
+  (`SERIAL_PORT` is never `-1`; no `SerialUSB`). The STM32's USB OTG is
+  configured as a **host for USB flash drives** (the "print from USB stick"
+  feature), not as a device a PC can drive. The external USB-C to a computer is
+  handled by the Linux comm module via Anker's own file-transfer protocol.
+
+So a USB-C cable to a computer yields Anker's file-drop, not open control. The
+only wired control path is the invasive **serial bridge**: tap the internal
+STM32↔Linux UART (the 912600-baud link) with a USB-UART adapter — opening the
+printer, identifying the header (logic analyzer), and co-opting or replacing that
+link (never both devices driving it at once). This keeps the MQTT-broker redirect
+as the least-invasive path to try first.
+
 ## Confidence ranking (updated with evidence)
 
 | Approach | Status | Risk |
