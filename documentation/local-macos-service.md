@@ -131,8 +131,12 @@ The installed LaunchAgent runs:
 ```text
 /Users/gary/ankermake-m5-protocol/.venv/bin/python
 /Users/gary/ankermake-m5-protocol/ankerctl.py
-webserver run --host 0.0.0.0
+--insecure webserver run --host 0.0.0.0
 ```
+
+`--insecure` is required only for the private local-broker setup: its Mosquitto
+certificate is self-signed. Do not use this option when connecting to an
+untrusted broker or network.
 
 It uses:
 
@@ -217,7 +221,7 @@ Restarting `ankerctl` does not restart the printer or MediaMTX.
 ### Verify printer reachability
 
 ```sh
-ping -c 2 192.168.68.57
+ping -c 2 192.168.2.2
 
 cd /Users/gary/ankermake-m5-protocol
 .venv/bin/python ankerctl.py pppp lan-search
@@ -266,6 +270,11 @@ Host: http://127.0.0.1:4470
 API key: not required
 Operation: Send and Print
 ```
+
+`127.0.0.1:4470` is the correct endpoint when Orca runs on the Mac. It is the
+`ankerctl` HTTP service, not the printer (`192.168.2.2`) or Mosquitto (`:8789`).
+The Orca connection test only requests `/api/version`; a real upload must appear
+in `ankerctl.log` as `POST /api/files/local`.
 
 The saved user preset is:
 
@@ -527,10 +536,10 @@ together.
 
 ### PPPP is `Starting` after a printer reboot
 
-The printer may need 30–60 seconds to rejoin Wi-Fi.
+The printer may need 30–60 seconds to rejoin the `M5C-Local` hotspot.
 
 ```sh
-ping -c 2 192.168.68.57
+ping -c 2 192.168.2.2
 tail -f /Users/gary/ankermake-m5-protocol/ankerctl.log
 ```
 
@@ -553,9 +562,10 @@ complete file. Partial transfers are not resumable.
 
 ### MQTT works but PPPP does not
 
-MQTT is cloud-mediated; PPPP file transfer may use the printer's LAN address.
-Confirm the Mac and printer are on reachable networks and the cached printer
-IP is current.
+In the local-broker topology, MQTT terminates on the Mac, while PPPP file
+transfer still uses the printer's LAN address. Confirm the cached `ip_addr` in
+`~/Library/Application Support/ankerctl/default.json` is the hotspot lease
+(`192.168.2.2` here), then restart `ankerctl`.
 
 Run:
 

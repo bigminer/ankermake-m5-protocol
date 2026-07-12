@@ -34,6 +34,70 @@ Still dependent on Anker cloud MQTT (`make-mqtt.ankermake.com`):
 - Initial account / printer provisioning (auth token, MQTT credentials,
   MQTT key, P2P DUID/DSK) via `cli/config.py:load_config_from_api`.
 
+### System communication flow (current)
+
+Every control path exits to Anker's cloud MQTT and comes back down to the
+printer — no client on the LAN drives the printer directly. Verified by `lsof`
+during a live OrcaSlicer print (2026-07-12): Orca holds **no** socket to the
+printer; it hands the job to `ankerctl` on `localhost:4470`, and `ankerctl`'s
+only outbound printer link is to `166.117.17.78:8789`
+(`awsglobalaccelerator.com` — Anker cloud MQTT). Zero Mac→printer LAN sockets.
+
+```
+                          ☁  ANKER CLOUD (AWS)  ☁
+        ┌───────────────────────────────────────────────────────────┐
+        │   make-mqtt.ankermake.com          P2P / PPPP relay        │
+        │   166.117.x.x : 8789  (MQTT/TLS)   34.223.135.175 : 32100  │
+        │   [AWS Global Accelerator]         [rendezvous for video]  │
+        └───────▲───────────────▲───────────────────▲───────────────┘
+                │               │                   │
+        MQTT/TLS│       MQTT/TLS│           PPPP/UDP │ (camera, file xfer,
+        (control│       (control│           P2P      │  falls back to relay
+         + tele)│        parity)│                    │  if no direct LAN P2P)
+                │               │                   │
+   ═════════════╪═══════════════╪═══════════════════╪═════════ INTERNET ═══
+                │               │                   │
+   ─────────────┼───────────────┼───────────────────┼──── YOUR LAN (192.168.68.x)
+                │               │                   │
+                │    ┌──────────┴───────────────────┴───────────────┐
+                │    │   Mac mini  (192.168.68.55)                   │
+                │    │                                               │
+                │    │   ┌─────────────┐   localhost:4470            │
+                │    │   │ OrcaSlicer  │──────────────┐              │
+                │    │   └─────────────┘              ▼              │
+                │    │                        ┌───────────────┐      │
+                │    │   ┌─────────────┐      │   ankerctl    │      │
+                │    │   │ eufyMake app│      │  webserver    │──────┼─► cloud MQTT
+                │    │   └──────┬──────┘      │ (the "phone"  │      │
+                │    │          │             │  MQTT client) │      │
+                │    │          └────────────►└───────────────┘      │
+                │    │        (also cloud MQTT, its own client)      │
+                │    │                                               │
+                │    │   ┌─────────────┐                             │
+                │    │   │  mediamtx   │◄──── camera stream (via PPPP relay)
+                │    │   └─────────────┘                             │
+                │    └───────────────────────────────────────────────┘
+                │
+                │  ┌─────────────────────────────────────────────────┐
+                └─►│  AnkerMake M5C  (192.168.68.57)                  │
+                   │                                                  │
+                   │   ┌────────────────┐      ┌───────────────────┐  │
+                   │   │ Linux comm mod │◄────►│ STM32F4 / Marlin  │  │
+                   │   │ (Wi-Fi, MQTT,  │ UART │ (motion, heat,    │  │
+                   │   │  camera, PPPP) │ 912k │  the actual print)│  │
+                   │   └────────────────┘      └───────────────────┘  │
+                   │        ▲                                         │
+                   │        └── DNS lookups → 192.168.4.1 (eero)      │
+                   │            plain UDP:53, honors DHCP DNS         │
+                   └─────────────────────────────────────────────────┘
+```
+
+The fully-local target collapses the cloud detour: point both the printer (via
+DNS override) and `ankerctl` at a **local** MQTT broker on the Mac, so the
+control rendezvous happens on the LAN with the internet unplugged. The one
+unverified link is whether the printer's TLS will trust a local broker's cert
+(Step 4).
+
 ## Step 1 — Preserve provisioning data (done 2026-07-11)
 
 A fresh setup after an Anker shutdown or factory reset is likely much harder
@@ -207,6 +271,169 @@ are app-managed consumer mesh, changing the DNS handed to the printer is done in
 the **Deco app** (set custom DNS → `192.168.68.55`), which only the operator can
 do. Broker + `dnsmasq` setup on the Mac is automatable; the DNS switch is manual.
 
+### Phase 1 — RESULT: printer accepts a local broker (PROVEN 2026-07-12) ✅
+
+The pivotal question is answered: **the M5C's TLS is lax — it connects to a local
+MQTT broker with a self-signed cert (`CN=make-mqtt.ankermake.com`) and requires no
+Anker CA.** Full local control is feasible; no firmware root or serial bridge is
+needed for the control path.
+
+What did NOT work (dead ends, so future work skips them):
+
+- **ARP-spoof + pf `rdr` to redirect the live cloud connection.** ARP poisoning
+  reliably diverts the printer's traffic through the Mac, and a spoofed TCP RST
+  reliably forces a fresh reconnect (fresh DNS lookup + SYN). But macOS pf `rdr`
+  would **not** deliver that ARP-diverted/forwarded traffic to a local socket —
+  neither `-> <LAN-IP>` nor `-> 127.0.0.1`. mosquitto never saw the connection.
+  pf `rdr` on *transit* traffic to a local service is unreliable on macOS.
+
+What worked — the winning architecture (Mac becomes the printer's router):
+
+1. **macOS Internet Sharing**: Mac uplinks via **Ethernet** (`en0`) and shares out
+   over **Wi-Fi** (`en1`) as a dedicated, printer-only hotspot (`M5C-Local`). The
+   Mac is `192.168.2.1` on `bridge100`; the printer gets `192.168.2.2` via `bootpd`.
+2. **Local DNS**: `dnsmasq` on `127.0.0.1:5354` answers
+   `make-mqtt.ankermake.com → 192.168.2.1`, forwards everything else upstream.
+   (`mDNSResponder` owns `*:53` and does not serve `/etc/hosts` to clients, so
+   dnsmasq runs on a high port.)
+3. **DNS interception without breaking NAT**: because the printer's `:53` query is
+   addressed to the Mac's own IP (local, not transit), pf `rdr` works here. The
+   rule is loaded into a `com.apple/anker_dns` sub-anchor (evaluated by the stock
+   `rdr-anchor "com.apple/*"`), so it coexists with the Internet-Sharing NAT
+   instead of flushing it: `rdr pass on bridge100 ... to 192.168.2.1 port 53 ->
+   127.0.0.1 port 5354`.
+4. **Broker**: mosquitto on `*:8789`, TLS with the self-signed
+   `CN=make-mqtt.ankermake.com` cert, `allow_anonymous`.
+
+#### Communication flow (fully local)
+
+```
+             ☁  ANKER CLOUD (AWS)  ☁          ✗ BYPASSED — no printer traffic
+             make-mqtt.ankermake.com :8789     the printer never reaches it
+   ══════════════════════════════════════════════════════ INTERNET ══════
+
+   ┌──────────────────┐   WAN
+   │  Deco / eero      │──────────► internet
+   │  home router      │
+   └────────┬──────────┘
+            │ Ethernet (uplink only)
+            ▼  en0 = 192.168.4.41
+   ┌───────────────────────────────────────────────────────────────────┐
+   │  MAC MINI  —  now the printer's router                             │
+   │                                                                     │
+   │   macOS Internet Sharing (NAT):  en0 ─────► Wi-Fi hotspot (en1)     │
+   │   bridge100 = 192.168.2.1   SSID "M5C-Local" (WPA2)                 │
+   │                                                                     │
+   │   ┌─────────────┐   "make-mqtt?"     ┌──────────────┐              │
+   │   │  pf rdr      │──────────────────►│  dnsmasq     │              │
+   │   │  :53 → 5354  │◄──192.168.2.1─────│  :5354       │──► upstream  │
+   │   │ (com.apple/  │                   │  make-mqtt = │    (other    │
+   │   │  anker_dns)  │                   │  192.168.2.1 │     names)    │
+   │   └─────────────┘                    └──────────────┘              │
+   │                                                                     │
+   │   ┌───────────────────────────────┐   ┌────────────────────────┐  │
+   │   │  mosquitto  *:8789            │◄──│  ankerctl (the "phone" │  │
+   │   │  TLS, self-signed             │──►│  client) — make-mqtt   │  │
+   │   │  CN=make-mqtt.ankermake.com   │   │  → 192.168.2.1 too     │  │
+   │   └───────────────────────────────┘   └────────────────────────┘  │
+   │            ▲                                                        │
+   └────────────┼────────────────────────────────────────────────────── ┘
+                │ Wi-Fi (WPA2), DHCP lease 192.168.2.2
+                │
+                │  (1) DNS: make-mqtt? ─► gets 192.168.2.1 (the Mac)
+                │  (2) MQTT/TLS :8789 ─► local broker, cert accepted (LAX)
+                │  (3) SUBSCRIBE /device|smart|server/maker/<sn>/...command|query
+                │  (4) PUBLISH   /phone/maker/<sn>/notice (temps/state) + replies
+                ▼
+   ┌─────────────────────────────────────────────────┐
+   │  AnkerMake M5C  (192.168.2.2)                     │
+   │   ┌────────────────┐      ┌───────────────────┐   │
+   │   │ Linux comm mod │◄────►│  STM32F4 / Marlin │   │
+   │   │ Wi-Fi + MQTT   │ UART │  motion / heat    │   │
+   │   └────────────────┘      └───────────────────┘   │
+   └─────────────────────────────────────────────────┘
+
+   Control rendezvous now happens ON THE MAC: the printer and ankerctl both
+   resolve make-mqtt to 192.168.2.1 and meet at the local broker. Anker's
+   cloud is out of the loop for MQTT entirely.
+```
+
+Observed on the local broker (Anker cloud fully bypassed):
+
+- TLS handshake completed; MQTT `CONNECT` accepted as client
+  `dev_fdm_..._AK75CU2D26100511` (user `eufy_fdm_AK75CU2D26100511`, p4/c1/k40).
+- Printer **subscribed** to its command topics
+  (`/device/maker/<sn>/query`, `/smart/maker/<sn>/command`,
+  `/server/maker/<sn>/command`).
+- Printer **published** its full telemetry to us: `/phone/maker/<sn>/notice`
+  every ~3 s, plus `/query/reply` (761 B) and `/command/reply`. Payloads are the
+  usual MA-framed + AES (decodable with the printer's `mqtt_key`, which `ankerctl`
+  already holds).
+
+#### `ankerctl` integration and supervised print validation (2026-07-12)
+
+The broker redirect also requires two `ankerctl` changes; neither is optional:
+
+1. Set the cached `printer.ip_addr` in
+   `~/Library/Application Support/ankerctl/default.json` to the hotspot lease
+   (`192.168.2.2` in this installation). PPPP file transfer opens a direct LAN
+   session to this stored address; it does not discover the printer through the
+   local MQTT broker.
+2. Add `--insecure` between `ankerctl.py` and `webserver` in the
+   `com.ankerctl.webserver` LaunchAgent's `ProgramArguments`, then reload the
+   LaunchAgent. The local broker uses a self-signed certificate, so stock
+   `ankerctl` otherwise rejects its TLS connection. This option is acceptable
+   only because the broker is private and reachable solely through the
+   printer-only hotspot.
+
+With those changes applied, the following were verified with an operator at the
+printer:
+
+- `ankerctl --insecure mqtt monitor` connected to the local broker and decoded
+  live nozzle and bed telemetry.
+- A raw `G28` command was accepted by Marlin (`xy trigger`, then `busy` reply).
+- OrcaSlicer using its OctoPrint-compatible `127.0.0.1:4470` endpoint uploaded
+  a 7.5 MB G-code file. `ankerctl` connected to `192.168.2.2` over PPPP,
+  completed all file blocks, requested the print start, and returned HTTP 200
+  to Orca. The printer beeped when it accepted the request.
+
+The expected upload confirmation is:
+
+```text
+Going to upload ... bytes as 'name.gcode'
+File upload complete. Requesting print start of job.
+Successfully sent print job
+POST /api/files/local HTTP/1.1" 200
+```
+
+Remaining work for a durable fully-local end state:
+
+- Persist across reboots: Internet Sharing auto-start, `dnsmasq` + pf-anchor +
+  mosquitto as launchd services.
+- Sever the rest of Anker: block Anker domains at the Mac (it is now the printer's
+  router), and address the P2P/PPPP relay (camera), NTP, and firmware/OTA ties.
+
+#### Cloud block — defense-in-depth (implemented 2026-07-12)
+
+Because the Mac is the printer's router, Anker is blocked *there*, scoped to the
+printer (`192.168.2.2`) — the home router cannot target the printer (it's NAT'd
+behind the Mac). Two layers:
+
+- **DNS blackhole (dnsmasq):** `address=/ankermake.com/0.0.0.0` (+ `::`, +
+  `eufylife.com`), with the more-specific `make-mqtt.ankermake.com → 192.168.2.1`
+  winning. Catches any hostname-based cloud contact. Verified: `make-app` → 0.0.0.0,
+  `make-mqtt` → 192.168.2.1, normal domains resolve.
+- **pf IP block (`com.apple/anker_block` anchor, `quick`, printer-scoped):**
+  `block drop quick on bridge100 from 192.168.2.2 to 34.223.135.175` (the Anker
+  **P2P/PPPP WAN relay**, reached by hardcoded IP so DNS alone misses it) and
+  `... to 166.117.0.0/16` (Anker MQTT Global-Accelerator range). Confirmed live:
+  the printer retried the P2P relay and pf dropped the packets (counter > 0), while
+  the local MQTT connection and telemetry were unaffected.
+
+Net effect: the printer's only surviving cloud-shaped connection is MQTT — and
+that now terminates on the **local** broker. The Anker cloud is severed for the
+printer while it keeps running normally.
+
 ### USB-C is not an open control path (verified 2026-07-12)
 
 Checked whether the printer's USB-C port could drive Marlin directly (which would
@@ -235,7 +462,7 @@ as the least-invasive path to try first.
 | --- | --- | --- |
 | PPPP-only control by reusing MQTT command types | **Disproven** (Step 3 probe) | Low |
 | Discover a local control sub-protocol via official-app LAN capture | **Disproven** (Step 2: app is cloud-MQTT-only) | Low |
-| Redirect printer to a local MQTT broker | **Now the highest-leverage path** — ankerctl already has full control parity over MQTT; only the transport is cloud-bound. Feasibility hinges on the printer's TLS trust (test next). | Medium-high |
+| Redirect printer to a local MQTT broker | **PROVEN & IMPLEMENTED (2026-07-12)** — printer accepts a self-signed local broker (lax TLS); full telemetry + command-topic subscriptions land on our broker via a Mac-hosted, printer-only hotspot with local DNS. Cloud MQTT bypassed. | Low (done) |
 | PPPP + stock-Marlin serial bridge (USB-UART sidecar) | Strongest *guaranteed* durable path; needs hardware | Medium |
 | Replace firmware (Klipper / custom Marlin) | Feasible, least mature | High |
 
@@ -247,21 +474,12 @@ terminates (local broker) or *how* G-code reaches Marlin (serial bridge).
 
 ## Recommended next steps
 
-1. **Test whether the printer will accept a redirected MQTT broker.** This is
-   now the pivotal experiment. The printer connects outbound to
-   `make-mqtt.ankermake.com:8789` over TLS. On a network where we control DNS
-   (the printer's LAN), override that name to a local broker and observe what
-   the printer requires:
-   - Does it validate the server certificate against Anker's CA / hostname, or
-     connect loosely? Stand up a local MQTT broker on `:8789`, first with the
-     existing `ssl/ankermake-mqtt.crt` chain, and watch whether the printer
-     completes the TLS handshake and subscribes to `/device/maker/<sn>/command`.
-   - If TLS is strict and needs Anker's private key (we don't have it), the
-     redirect requires firmware root to install our own CA — escalate to the
-     serial bridge instead. If the printer is lax, this yields full local
-     control with the command set `ankerctl` already implements.
-   - Do this read-only first: a broker that only logs subscribe/connect
-     attempts, before it ever publishes a command.
+1. ~~**Test whether the printer will accept a redirected MQTT broker.**~~
+   **DONE (2026-07-12) — printer accepts a self-signed local broker (lax TLS).**
+   See "Phase 1 — RESULT" under Step 4 for the proven architecture (Mac-hosted
+   hotspot + local DNS + mosquitto) and the remaining work to reach the durable
+   fully-local end state (persist services across reboot and sever the remaining
+   P2P/NTP/firmware ties).
 
 2. **Decouple the app from MQTT behind a `PrinterTransport` interface**
    (commands, queries, events, uploads) so the UI consumes normalized printer
