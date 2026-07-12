@@ -1,9 +1,19 @@
 # Local Control Research: Decoupling from Anker
 
-Goal: reduce this application's dependence on Anker's cloud (account,
-HTTPS, MQTT hosts) so the printer keeps working after an Anker shutdown or
-factory reset. This document records what is already local, what was tested,
-and the evidence for the recommended route.
+Goal: reclaim full, independent ownership of the AnkerMake M5C — run the printer
+**entirely on the local network with Anker's cloud permanently severed**, so it
+keeps working regardless of Anker's service status (shutdown, account lockout,
+factory reset). This is a full replacement of the cloud, not merely reducing
+reliance on it.
+
+The key enabler, established below: `ankerctl` already has **full control
+parity** with the official app (both drive the printer over the same MQTT
+command set); the only remaining Anker dependency is the cloud *transport*.
+So the work is transport redirection, not protocol reverse-engineering. This
+document records what is already local, what was tested, and the evidence for
+the recommended route — redirect the printer's MQTT to a local broker, with a
+USB-UART serial G-code bridge as the guaranteed fallback. The concrete plan is
+in [next-step-local-broker.md](next-step-local-broker.md).
 
 ## Current boundary (what is already local vs. cloud)
 
