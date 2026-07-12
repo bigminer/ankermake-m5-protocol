@@ -1,12 +1,14 @@
 import contextlib
 import io
 import json
+import time
 import unittest
 from datetime import datetime
 from unittest import mock
 
 from cli.model import Account, Config, Printer
 from web import app, _require_token, ctrl_send_mqtt
+from web.lib.service import RunState
 
 
 class FakeConfigManager:
@@ -36,6 +38,18 @@ class FakeSocket:
 
     def send(self, payload):
         self.sent.append(payload)
+
+
+class FakeServiceSet:
+
+    def __init__(self, svcs):
+        self.svcs = svcs
+
+
+class FakeService:
+
+    def __init__(self, state):
+        self.state = state
 
 
 def make_config(webcam_url=""):
@@ -79,6 +93,8 @@ class WebUiTestCase(unittest.TestCase):
         self.old_video_supported = app.config.get("video_supported")
         self.old_printer_index = app.config.get("printer_index")
         self.old_webcam_url = app.config.get("webcam_url")
+        self.old_preprint_g36 = app.config.get("preprint_g36")
+        self.old_svc = app.svc
 
         app.config["TESTING"] = True
         app.config["config"] = FakeConfigManager(make_config())
@@ -86,6 +102,7 @@ class WebUiTestCase(unittest.TestCase):
         app.config["video_supported"] = False
         app.config["printer_index"] = 0
         app.config["webcam_url"] = ""
+        app.config["preprint_g36"] = False
 
     def tearDown(self):
         app.config["TESTING"] = self.old_testing
@@ -95,6 +112,8 @@ class WebUiTestCase(unittest.TestCase):
         app.config["video_supported"] = self.old_video_supported
         app.config["printer_index"] = self.old_printer_index
         app.config["webcam_url"] = self.old_webcam_url
+        app.config["preprint_g36"] = self.old_preprint_g36
+        app.svc = self.old_svc
 
     def test_root_without_token_is_available(self):
         app.config["access_token"] = ""
@@ -141,6 +160,93 @@ class WebUiTestCase(unittest.TestCase):
         self.assertEqual(upload_resp.status_code, 200)
         upload_file.assert_called_once()
 
+    def test_login_rejects_external_next_redirects(self):
+        app.config["access_token"] = "shared-secret"
+
+        resp = self.client.post(
+            "/login?next=https://example.invalid/phish",
+            data={"token": "shared-secret"},
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.location, "/")
+
+    def test_api_files_local_rejects_upload_only(self):
+        resp = self.client.post(
+            "/api/files/local",
+            data={
+                "print": "false",
+                "file": (io.BytesIO(b"G1 X1\n"), "test.gcode"),
+            },
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn(b"Upload-only not supported", resp.data)
+
+    def test_api_files_local_requires_file(self):
+        resp = self.client.post("/api/files/local", data={"print": "true"})
+
+        self.assertEqual(resp.status_code, 400)
+
+    def test_api_files_local_reports_upload_failure(self):
+        with mock.patch(
+            "web.util.upload_file_to_printer",
+            side_effect=ConnectionError("printer offline"),
+        ):
+            resp = self.client.post(
+                "/api/files/local",
+                data={
+                    "print": "true",
+                    "file": (io.BytesIO(b"G1 X1\n"), "test.gcode"),
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn(b"Cannot connect to printer", resp.data)
+        self.assertIn(b"printer offline", resp.data)
+
+    def test_api_files_local_success(self):
+        with mock.patch("web.util.upload_file_to_printer") as upload_file:
+            resp = self.client.post(
+                "/api/files/local",
+                data={
+                    "print": "true",
+                    "file": (io.BytesIO(b"G1 X1\n"), "test.gcode"),
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json, {})
+        upload_file.assert_called_once()
+
+    def test_status_reports_service_shape(self):
+        app.svc = FakeServiceSet({
+            "mqttqueue": FakeService(RunState.Running),
+            "pppp": FakeService(RunState.Stopped),
+        })
+
+        resp = self.client.get("/api/ankerctl/status")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json["status"], "ok")
+        self.assertEqual(resp.json["services"]["mqttqueue"]["online"], True)
+        self.assertEqual(resp.json["services"]["pppp"]["state"], "Stopped")
+        self.assertEqual(resp.json["possible_states"]["Running"], RunState.Running.value)
+        self.assertEqual(resp.json["version"]["server"], "1.9.0")
+
+    def test_status_reports_error_when_all_services_offline(self):
+        app.svc = FakeServiceSet({
+            "mqttqueue": FakeService(RunState.Stopped),
+        })
+
+        resp = self.client.get("/api/ankerctl/status")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json["status"], "error")
+
     def test_webcam_setting_persists_in_config(self):
         app.config["access_token"] = "shared-secret"
 
@@ -151,6 +257,32 @@ class WebUiTestCase(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(app.config["config"].cfg.webcam_url, "http://cam/new.mjpg")
+
+    def test_update_printer_ip_reports_no_printers_found(self):
+        with self.client.session_transaction() as sess:
+            sess["authed"] = True
+
+        with mock.patch("cli.pppp.pppp_find_printer_ip_addresses", return_value=[]):
+            resp = self.client.post("/api/ankerctl/config/updateip")
+
+        self.assertEqual(resp.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["_flashes"][-1][0], "danger")
+            self.assertIn("No printers responded", sess["_flashes"][-1][1])
+
+    def test_update_printer_ip_reports_update_failure(self):
+        with self.client.session_transaction() as sess:
+            sess["authed"] = True
+
+        with mock.patch(
+            "cli.pppp.pppp_find_printer_ip_addresses",
+            return_value=[("DUID123", "192.168.1.50")],
+        ), mock.patch("cli.config.update_printer_ip_addresses", return_value=None):
+            resp = self.client.post("/api/ankerctl/config/updateip")
+
+        self.assertEqual(resp.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["_flashes"][-1], ("danger", "Internal error."))
 
     def test_ws_ctrl_requires_auth_when_token_enabled(self):
         app.config["access_token"] = "shared-secret"
@@ -211,6 +343,119 @@ class WebUiTestCase(unittest.TestCase):
         })
         self.assertEqual(json.loads(fake_socket.sent[0])["mqttReply"]["resData"], "ok")
         self.assertEqual(handlers, [])
+
+    def test_ws_ctrl_ignores_unrelated_replies_until_timeout(self):
+        app.config["access_token"] = ""
+        old_timeout = app.config.get("CTRL_MQTT_REPLY_TIMEOUT")
+
+        fake_client = mock.Mock()
+        fake_socket = FakeSocket([])
+        message = {
+            "mqtt": {
+                "commandType": 0x0413,
+                "cmdData": "M105",
+                "cmdLen": 4,
+            },
+            "awaitResponse": True,
+        }
+
+        class FakeMqttService:
+            client = fake_client
+
+            @contextlib.contextmanager
+            def tap(self, handler):
+                handler({"commandType": 1003, "currentTemp": 21000})
+                yield self
+
+        @contextlib.contextmanager
+        def fake_borrow(name):
+            self.assertEqual(name, "mqttqueue")
+            yield FakeMqttService()
+
+        with mock.patch.object(app.svc, "borrow", fake_borrow), \
+                mock.patch("web.CTRL_MQTT_REPLY_TIMEOUT", 0.01):
+            start = time.monotonic()
+            ctrl_send_mqtt(fake_socket, message)
+
+        self.assertLess(time.monotonic() - start, 1)
+        self.assertIsNone(json.loads(fake_socket.sent[0])["mqttReply"])
+        self.assertEqual(app.config.get("CTRL_MQTT_REPLY_TIMEOUT"), old_timeout)
+
+    def test_ws_ctrl_no_response_command_does_not_wait(self):
+        app.config["access_token"] = ""
+
+        fake_client = mock.Mock()
+        fake_socket = FakeSocket([])
+        message = {
+            "mqtt": {
+                "commandType": 0x0413,
+                "cmdData": "M107",
+                "cmdLen": 4,
+            },
+            "awaitResponse": False,
+        }
+
+        class FakeMqttService:
+            client = fake_client
+
+            @contextlib.contextmanager
+            def tap(self, handler):
+                raise AssertionError("tap should not be used without awaitResponse")
+
+        @contextlib.contextmanager
+        def fake_borrow(name):
+            self.assertEqual(name, "mqttqueue")
+            yield FakeMqttService()
+
+        with mock.patch.object(app.svc, "borrow", fake_borrow):
+            ctrl_send_mqtt(fake_socket, message)
+
+        fake_client.command.assert_called_once_with(message["mqtt"])
+        self.assertEqual(fake_socket.sent, [])
+
+    def test_ws_ctrl_matching_reply_after_unrelated_reply(self):
+        app.config["access_token"] = ""
+
+        fake_client = mock.Mock()
+        fake_socket = FakeSocket([])
+        message = {
+            "mqtt": {
+                "commandType": 0x0413,
+                "cmdData": "M105",
+                "cmdLen": 4,
+            },
+            "awaitResponse": True,
+        }
+        handlers = []
+
+        class FakeMqttService:
+            client = fake_client
+
+            @contextlib.contextmanager
+            def tap(self, handler):
+                handlers.append(handler)
+                try:
+                    yield self
+                finally:
+                    handlers.remove(handler)
+
+        def deliver(_cmd):
+            for handler in handlers:
+                handler({"commandType": 1003, "currentTemp": 21000})
+                handler({"commandType": 0x0413, "resData": "ok T:21.0"})
+
+        fake_client.command.side_effect = deliver
+
+        @contextlib.contextmanager
+        def fake_borrow(name):
+            self.assertEqual(name, "mqttqueue")
+            yield FakeMqttService()
+
+        with mock.patch.object(app.svc, "borrow", fake_borrow):
+            ctrl_send_mqtt(fake_socket, message)
+
+        payload = json.loads(fake_socket.sent[0])
+        self.assertEqual(payload["mqttReply"]["resData"], "ok T:21.0")
 
 
 if __name__ == "__main__":

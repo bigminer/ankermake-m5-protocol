@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import uuid
 import logging as log
@@ -10,7 +11,7 @@ from tqdm import tqdm
 import cli.util
 
 from libflagship.pktdump import PacketWriter
-from libflagship.pppp import Duid, P2PCmdType, FileTransfer, PktLanSearch, PktPunchPkt
+from libflagship.pppp import Duid, P2PCmdType, FileTransfer, PktLanSearch, PktPunchPkt, Xzyh, Aabb
 from libflagship.ppppapi import AnkerPPPPApi, PPPPState
 
 
@@ -102,6 +103,61 @@ def pppp_find_printer_ip_addresses(dumpfile=None):
     else:
         # Non-Windows: Broadcast goes out on all interfaces
         yield from _pppp_query_printers(dumpfile=dumpfile)
+
+
+def _pppp_print_xzyh(chan, xzyh):
+    try:
+        cmd = P2PCmdType(xzyh.cmd).name
+    except ValueError:
+        cmd = f"0x{xzyh.cmd:04x}"
+
+    try:
+        body = json.dumps(json.loads(xzyh.data.decode()))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        body = xzyh.data[:256].hex()
+
+    log.info(f"chan{chan} XZYH cmd={cmd} len={xzyh.len} data={body}")
+
+
+def pppp_listen(api, duration):
+    """
+    Print all channel traffic received within `duration` seconds.
+
+    Protocol research helper: decodes XZYH and AABB frames arriving on any
+    channel, and dumps anything unrecognized as hex. Returns the number of
+    frames received.
+    """
+    deadline = time.monotonic() + duration
+    frames = 0
+
+    while time.monotonic() < deadline:
+        for ch in api.chans:
+            with ch.lock:
+                hdr = ch.peek(16, timeout=0)
+                if not hdr:
+                    continue
+
+                if hdr[:4] == b"XZYH":
+                    xzyh = Xzyh.parse(hdr)[0]
+                    data = ch.read(xzyh.len + 16, timeout=1.0)
+                    if data is None:
+                        continue
+                    xzyh.data = data[16:]
+                    frames += 1
+                    _pppp_print_xzyh(ch.index, xzyh)
+                elif hdr[:2] == b"\xaa\xbb":
+                    hdr = ch.read(12, timeout=0)
+                    aabb = Aabb.parse(hdr)[0]
+                    body = (ch.read(aabb.len + 2, timeout=1.0) or b"")[:-2]
+                    frames += 1
+                    log.info(f"chan{ch.index} AABB frametype={aabb.frametype} sn={aabb.sn} data={body.hex()}")
+                else:
+                    junk = ch.read(16, timeout=0)
+                    frames += 1
+                    log.info(f"chan{ch.index} unknown data: {junk.hex()}")
+        time.sleep(0.05)
+
+    return frames
 
 
 def pppp_send_file(api, fui, data):
