@@ -173,6 +173,40 @@ unlikely to change the maker-command result — but it was not exhaustively
 tested. What is proven: the naive "tunnel MQTT commandTypes over PPPP" path is
 a dead end.
 
+## Step 4 — Local broker redirect (in progress)
+
+The plan is in [next-step-local-broker.md](next-step-local-broker.md).
+
+### Phase 0 recon — printer cloud dependencies + DNS behavior (2026-07-11)
+
+Method: half-duplex ARP poisoning of the printer (only its ARP entry for the
+gateway spoofed, so it kept full connectivity) + `tcpdump` for 2 min, then ARP
+and `sysctl` fully restored. Read-only with respect to the printer — no command
+sent. Findings:
+
+- **DNS:** the printer resolves via **`192.168.4.1`** (the eero, handed to it by
+  the Deco as a DNS server) over plain **UDP:53** — no DoH. It honors
+  DHCP-provided DNS (observed a `www.apple.com` connectivity check). → A DNS
+  override is viable: if the printer's resolver answers
+  `make-mqtt.ankermake.com` with our broker's IP, it will follow.
+- **Outbound cloud connections in the window:**
+  - `make-mqtt.ankermake.com:8789` (`166.117.252.238`, AWS Global Accelerator) —
+    the persistent MQTT control/telemetry channel. **The redirect target.**
+  - `34.223.135.175:32100` — Anker PPPP/P2P **WAN relay** (supernode) for
+    cloud-relayed remote access; severable (LAN PPPP is used directly on-net).
+  - No NTP (:123) or firmware HTTPS (:443) seen in 2 min — may occur on longer
+    intervals; a longer capture would complete the full sever-list.
+- The MQTT connection was already established, so no fresh `make-mqtt` DNS lookup
+  was captured; but the printer clearly uses DNS and its MQTT peer is a
+  `make-mqtt.ankermake.com` Global Accelerator address, so DNS use is
+  near-certain. Phase 1 (override) confirms it definitively.
+
+**Gate — next action needs the operator.** Phase 1 points the printer's resolver
+at a local `dnsmasq` on the Mac (`192.168.68.55`). Because both the Deco and eero
+are app-managed consumer mesh, changing the DNS handed to the printer is done in
+the **Deco app** (set custom DNS → `192.168.68.55`), which only the operator can
+do. Broker + `dnsmasq` setup on the Mac is automatable; the DNS switch is manual.
+
 ## Confidence ranking (updated with evidence)
 
 | Approach | Status | Risk |
