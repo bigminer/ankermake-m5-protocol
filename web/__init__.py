@@ -165,6 +165,7 @@ def app_login():
 import web.service.pppp
 import web.service.video
 import web.service.mqtt
+import web.service.state
 import web.service.filetransfer
 # autopep8: on
 
@@ -226,6 +227,23 @@ def mqtt(sock):
     for data in app.svc.stream("mqttqueue"):
         log.debug(f"MQTT message: {data}")
         sock.send(json.dumps(data))
+
+
+@sock.route("/ws/state")
+def state(sock):
+    """
+    Normalized printer-state stream. MQTT notices are mapped to a stable schema
+    (nozzle/bed/print/speed/state) so the UI consumes named fields instead of
+    parsing raw commandType messages. The raw feed remains on /ws/mqtt.
+    """
+    if not _auth_is_valid():
+        return
+    if not app.config["login"]:
+        return
+    for data in app.svc.stream("mqttqueue"):
+        norm = web.service.state.normalize(data)
+        if norm:
+            sock.send(json.dumps(norm))
 
 
 @sock.route("/ws/video")

@@ -218,8 +218,8 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     page.evaluate(
         """
         window.__wsInstances
-            .find((ws) => ws.url.includes("/ws/mqtt"))
-            .emit({commandType: 1001, name: "job.gcode"});
+            .find((ws) => ws.url.includes("/ws/state"))
+            .emit({print: {name: "job.gcode"}});
         """
     )
 
@@ -325,8 +325,8 @@ def test_home_tab_preheat_modal_sends_preheat_config(page, live_http_server):
     page.evaluate(
         """
         window.__wsInstances
-            .find((ws) => ws.url.includes("/ws/mqtt"))
-            .emit({commandType: 1003, currentTemp: 2000, targetTemp: 0});
+            .find((ws) => ws.url.includes("/ws/state"))
+            .emit({nozzle: {current: 2000, target: 0}});
         """
     )
     page.wait_for_function("!document.querySelector('#set-nozzle-temp').disabled")
@@ -368,20 +368,21 @@ def test_mqtt_telemetry_updates_control_tab(page, live_http_server):
 
     page.evaluate(
         """
-        const mqtt = window.__wsInstances.find((ws) => ws.url.includes("/ws/mqtt"));
-        mqtt.emit({
-            commandType: 1001,
-            name: "cube.gcode",
-            progress: 4200,
-            totalTime: 65,
-            time: 125,
-            img: "http://printer.local/preview.jpg",
+        const state = window.__wsInstances.find((ws) => ws.url.includes("/ws/state"));
+        state.emit({
             state: "printing",
+            print: {
+                name: "cube.gcode",
+                progress: 4200,
+                elapsed: 65,
+                remaining: 125,
+                img: "http://printer.local/preview.jpg",
+            },
         });
-        mqtt.emit({commandType: 1003, currentTemp: 21500, targetTemp: 4000});
-        mqtt.emit({commandType: 1004, currentTemp: 3300, targetTemp: 3500});
-        mqtt.emit({commandType: 1006, value: 100});
-        mqtt.emit({commandType: 1052, real_print_layer: 3, total_layer: 20});
+        state.emit({nozzle: {current: 21500, target: 4000}});
+        state.emit({bed: {current: 3300, target: 3500}});
+        state.emit({speed: 100});
+        state.emit({print: {layer: {current: 3, total: 20}}});
         """
     )
 
