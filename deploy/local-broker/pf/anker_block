@@ -1,0 +1,15 @@
+# Default-deny internet egress for the printer (192.168.2.2), loaded into the
+# com.apple/anker_block sub-anchor. This severs Anker's cloud robustly: once
+# fully local, every peer the printer legitimately needs is on the hotspot
+# subnet (MQTT broker, DNS, NTP, and PPPP file transfer all live on the Mac at
+# 192.168.2.1). An IP blocklist cannot keep up — make-mqtt / make-app /
+# www.anker.com are fronted by AWS Global Accelerator, which answers from many
+# rotating anycast addresses across AWS ranges (observed 3.33.186.135,
+# 15.197.167.90, 166.117.x — all the same GA endpoint). Blocking off-subnet
+# egress instead is immune to that rotation and also drops OTA + connectivity
+# checks.
+#
+# rdr rules in anker_dns rewrite the printer's DNS (:53) and NTP (:123) to
+# 192.168.2.1 *before* these filter rules run, so both match the pass below.
+pass  quick on bridge100 inet from 192.168.2.2 to 192.168.2.0/24
+block drop quick on bridge100 inet from 192.168.2.2 to any

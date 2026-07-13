@@ -1,0 +1,14 @@
+# Redirect the printer's DNS (addressed to the Mac's hotspot IP) into local
+# dnsmasq on 127.0.0.1:5354. Loaded into the com.apple/anker_dns sub-anchor so
+# it coexists with Internet Sharing's NAT rather than replacing the ruleset.
+# rdr works here because the query is addressed to the Mac's own IP (local, not
+# transit) — the ARP-spoof/transit rdr path does NOT work on macOS.
+rdr pass on bridge100 inet proto tcp from any to 192.168.2.1 port 53 -> 127.0.0.1 port 5354
+rdr pass on bridge100 inet proto udp from any to 192.168.2.1 port 53 -> 127.0.0.1 port 5354
+
+# Transparent NTP: catch the printer's time sync (it queries time.nist.gov /
+# pool.ntp.org) and serve it from the local chrony on the Mac, so its clock
+# stays correct with the internet unplugged. Hostname-agnostic — it redirects
+# whatever server the firmware picks. Paired with the default-deny egress in
+# anker_block (which would otherwise drop :123).
+rdr pass on bridge100 inet proto udp from 192.168.2.2 to any port 123 -> 192.168.2.1 port 123

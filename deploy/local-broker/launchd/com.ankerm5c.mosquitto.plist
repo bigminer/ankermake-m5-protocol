@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ankerm5c.mosquitto</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/sbin/mosquitto</string>
+        <string>-c</string>
+        <string>/opt/ankerm5c/mosquitto.conf</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/opt/ankerm5c/logs/mosquitto.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/opt/ankerm5c/logs/mosquitto.err.log</string>
+</dict>
+</plist>
