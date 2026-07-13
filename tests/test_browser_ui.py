@@ -187,14 +187,15 @@ def _commands(page):
 def test_login_page_renders_and_accepts_valid_token(page, live_http_server):
     page.goto(live_http_server + "/")
 
-    assert "Access token required" in page.locator("body").inner_text()
+    # card headers are uppercased via CSS, so match case-insensitively
+    assert "access token required" in page.locator("body").inner_text().lower()
 
     page.get_by_placeholder("Token").fill("shared-secret")
     page.get_by_role("button", name="Log in").click()
 
     page.wait_for_selector("#control-tab")
     page.click("#control-tab")
-    assert "GCode Terminal" in page.locator("body").inner_text()
+    assert "g-code terminal" in page.locator("body").inner_text().lower()
 
 
 def test_control_buttons_enable_when_ctrl_socket_opens(page, live_http_server):

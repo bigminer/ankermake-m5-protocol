@@ -31,38 +31,46 @@
                         allow="autoplay; fullscreen"
                         title="Webcam stream" id="webcam-frame-live"></iframe>
                 {% else %}
-                <div class="card">
-                    <div class="card-body text-center">
-                        <p class="display-1">
+                <div class="card h-100">
+                    <div class="card-body text-center d-flex flex-column justify-content-center py-5">
+                        <p class="display-1 mb-2">
                             {{ macro.bi_icon("camera-video-off") }}
                         </p>
-                        <p class="display-6">Camera not available</p>
+                        <p class="display-6 text-body-secondary mb-1">Camera not available</p>
+                        <p class="small text-body-secondary mb-0">
+                            The AnkerMake M5C has no onboard camera. Add an external webcam
+                            under <strong>Setup</strong> to see a live feed here.
+                        </p>
                     </div>
                 </div>
                 {% endif %}
             </div>
             <div class="col-md-12 col-lg-6 col-xl-4">
-                <div class="card">
-                    {% if printer %}
-                    <div class="card-header">
-                        Connection
-                    </div>
-                    <div class="card-body fw-bold">
-                        <div>
-                            {{ printer.name }} ({{ printer.sn }})
-                        </div>
-                        <span id="badge-mqtt" class="badge">MQTT</span>
-                        <span id="badge-pppp" class="badge">PPPP</span>
-                        {% if video_supported %}
-                        <span id="badge-video" class="badge">VIDEO</span>
-                        {% endif %}
-                        <span id="badge-ctrl" class="badge">CTRL</span>
-                    </div>
-                    {% endif %}
-                    {% if video_supported %}
-                    <div class="card-header fs-6">Video Controls</div>
+                {% if printer %}
+                <div class="card mb-3">
+                    <div class="card-header">Connection</div>
                     <div class="card-body">
-                        <div class="row g-3 mb-3">
+                        <div class="fw-semibold mb-2">
+                            {{ printer.name }}
+                            <span class="text-body-secondary fw-normal">· {{ printer.sn }}</span>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <span id="badge-mqtt" class="badge">MQTT</span>
+                            <span id="badge-pppp" class="badge">PPPP</span>
+                            {% if video_supported %}
+                            <span id="badge-video" class="badge">VIDEO</span>
+                            {% endif %}
+                            <span id="badge-ctrl" class="badge">CTRL</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if video_supported %}
+                <div class="card mb-3">
+                    <div class="card-header">Camera</div>
+                    <div class="card-body">
+                        <div class="row g-2">
                             <div class="col-6">
                                 <button class="w-100 btn btn-secondary" id="light-on">
                                     {{ macro.bi_icon("lightbulb", "Light on") }}
@@ -73,8 +81,6 @@
                                     {{ macro.bi_icon("lightbulb-off", "Light off") }}
                                 </button>
                             </div>
-                        </div>
-                        <div class="row g-3">
                             <div class="col-6">
                                 <button class="w-100 btn btn-secondary" id="quality-low">
                                     {{ macro.bi_icon("badge-sd", "SD Quality") }}
@@ -87,175 +93,121 @@
                             </div>
                         </div>
                     </div>
-                    {% endif %}
-                    <div class="card-header fs-6">Temperature</div>
+                </div>
+                {% endif %}
+
+                <div class="card mb-3">
+                    <div class="card-header">Temperature</div>
                     <div class="card-body">
                         <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="input-group">
-                                    <div class="input-group-text mx-auto" id="nozzleGroup">
-                                        <i class="icon icon-hotend"></i>
+                            <div class="col-6">
+                                <div class="stat-tile">
+                                    <div class="stat-head"><i class="icon icon-hotend"></i> Nozzle</div>
+                                    <div class="stat-value" id="nozzle-temp">0&deg;C</div>
+                                    <div class="stat-sub mt-1">
+                                        target
+                                        <button
+                                            type="button" class="btn temp-target-btn"
+                                            id="set-nozzle-temp"
+                                            name="set-nozzle-temp"
+                                            title="Target Nozzle Temperature"
+                                            aria-label="Target Nozzle Temperature"
+                                            data-bs-toggle="modal" data-bs-target="#popupModalInput"
+                                            data-input-type="number"
+                                            data-input-min="0"
+                                            data-input-max="300"
+                                            data-input-icon-class="icon-hotend"
+                                            data-input-unit="°C"
+                                            disabled
+                                        >
+                                            0&deg;C
+                                        </button>
                                     </div>
-                                    <span
-                                        id="nozzle-temp"
-                                        class="form-control text-center"
-                                        title="Current Nozzle Temperature"
-                                        aria-describedby="nozzleGroup"
-                                    >
-                                        0°C
-                                    </span>
-                                    <button
-                                        type="button" class="btn btn-secondary"
-                                        id="set-nozzle-temp"
-                                        name="set-nozzle-temp"
-                                        class="input-group-text"
-                                        title="Target Nozzle Temperature"
-                                        aria-label="Target Nozzle Temperature"
-                                        aria-describedby="nozzleGroup"
-                                        data-bs-toggle="modal" data-bs-target="#popupModalInput"
-                                        data-input-type="number"
-                                        data-input-min="0"
-                                        data-input-max="300"
-                                        data-input-icon-class="icon-hotend"
-                                        data-input-unit="°C"
-                                        disabled
-                                    >
-                                        0°C
-                                    </button>
                                 </div>
                             </div>
-                            <div class="col-md-6">
-                                <div class="input-group">
-                                    <div class="input-group-text mx-auto" id="bedGroup">
-                                        <i class="icon icon-bed"></i>
+                            <div class="col-6">
+                                <div class="stat-tile">
+                                    <div class="stat-head"><i class="icon icon-bed"></i> Bed</div>
+                                    <div class="stat-value" id="bed-temp">0&deg;C</div>
+                                    <div class="stat-sub mt-1">
+                                        target
+                                        <button
+                                            type="button" class="btn temp-target-btn"
+                                            id="set-bed-temp"
+                                            name="set-bed-temp"
+                                            title="Target Bed Temperature"
+                                            aria-label="Target Bed Temperature"
+                                            data-bs-toggle="modal" data-bs-target="#popupModalInput"
+                                            data-input-type="number"
+                                            data-input-min="0"
+                                            data-input-max="100"
+                                            data-input-icon-class="icon-bed"
+                                            data-input-unit="°C"
+                                            disabled
+                                        >
+                                            0&deg;C
+                                        </button>
                                     </div>
-                                    <span
-                                        id="bed-temp"
-                                        class="form-control text-center"
-                                        title="Current Bed Temperature"
-                                        aria-describedby="bedGroup"
-                                    >
-                                        0°C
-                                    </span>
-                                    <button
-                                        type="button" class="btn btn-secondary"
-                                        id="set-bed-temp"
-                                        name="set-bed-temp"
-                                        class="input-group-text"
-                                        title="Target Bed Temperature"
-                                        aria-label="Target Bed Temperature"
-                                        aria-describedby="bedGroup"
-                                        data-bs-toggle="modal" data-bs-target="#popupModalInput"
-                                        data-input-type="number"
-                                        data-input-min="0"
-                                        data-input-max="100"
-                                        data-input-icon-class="icon-bed"
-                                        data-input-unit="°C"
-                                        disabled
-                                    >
-                                        0°C
-                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="card-header fs-6">Print Progress</div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">Print Progress</div>
                     <div class="card-body">
-                        <div class="row mb-3 g-3">
-                            <div class="col-12">
-                                <div class="input-group">
-                                    <div class="input-group-text print-info-label" id="printName">Name</div>
-                                    <span
-                                        id="print-name"
-                                        class="form-control"
-                                        title="Print Name"
-                                        aria-describedby="printName"
-                                    >
-                                    </span>
-                                </div>
+                        <div class="input-group mb-3">
+                            <div class="input-group-text print-info-label" id="printName">Job</div>
+                            <span
+                                id="print-name"
+                                class="form-control"
+                                title="Print Name"
+                                aria-describedby="printName"
+                            >
+                            </span>
+                        </div>
+
+                        <div class="progress position-relative mb-3" id="printProgress">
+                            <div
+                                class="progress-bar progress-bar-striped progress-bar-animated fs-5"
+                                role="progressbar"
+                                id="progressbar"
+                                title="Progress Bar"
+                                aria-valuenow="0"
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                                style="width: 0%"
+                            >
+                                <span id="progress" class="position-absolute w-100 fw-bold">
+                                    0%
+                                </span>
                             </div>
                         </div>
-                        <div class="row mb-3 g-3">
+
+                        <div class="row g-2">
                             <div class="col-6">
-                                <div class="input-group">
-                                    <div class="input-group-text print-info-label" id="timeElapsed">
-                                        <i class="icon icon-time-passed"></i>
-                                    </div>
-                                    <span
-                                        id="time-elapsed"
-                                        class="form-control text-center"
-                                        title="Time Elapsed"
-                                        aria-describedby="timeElapsed"
-                                    >
-                                        00:00:00
-                                    </span>
+                                <div class="stat-tile">
+                                    <div class="stat-head"><i class="icon icon-time-passed"></i> Elapsed</div>
+                                    <div class="control-stat-value" id="time-elapsed" title="Time Elapsed">00:00:00</div>
                                 </div>
                             </div>
                             <div class="col-6">
-                                <div class="input-group">
-                                    <div class="input-group-text print-info-label" id="timeRemain">
-                                        <i class="icon icon-time-remaining"></i>
-                                    </div>
-                                    <span
-                                        id="time-remain"
-                                        class="form-control text-center"
-                                        title="Time Remaining"
-                                        aria-describedby="timeRemain"
-                                    >
-                                        00:00:00
-                                    </span>
+                                <div class="stat-tile">
+                                    <div class="stat-head"><i class="icon icon-time-remaining"></i> Remaining</div>
+                                    <div class="control-stat-value" id="time-remain" title="Time Remaining">00:00:00</div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="row mb-3 g-3">
-                            <div class="col-12">
-                                <div class="progress position-relative" id="printProgress">
-                                    <div
-                                        class="progress-bar progress-bar-striped progress-bar-animated fs-5"
-                                        role="progressbar"
-                                        id="progressbar"
-                                        title="Progress Bar"
-                                        aria-valuenow="0"
-                                        aria-valuemin="0"
-                                        aria-valuemax="100"
-                                        style="width: 0%"
-                                    >
-                                        <span id="progress" class="position-absolute w-100 fw-bold">
-                                            0%
-                                        </span>
-                                    </div>
+                            <div class="col-6">
+                                <div class="stat-tile">
+                                    <div class="stat-head">{{ macro.bi_icon("layers-half") }} Layer</div>
+                                    <div class="control-stat-value" id="print-layer" title="Print Layers">0/0</div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="input-group">
-                                    <div class="input-group-text print-info-label" id="printLayer">
-                                        {{ macro.bi_icon("layers-half") }}
-                                    </div>
-                                    <span
-                                        id="print-layer"
-                                        class="form-control text-center"
-                                        title="Print Layers"
-                                        aria-describedby="printLayer"
-                                    >
-                                        0/0
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="input-group">
-                                    <div class="input-group-text print-info-label" id="printSpeed">
-                                        {{ macro.bi_icon("speedometer") }}
-                                    </div>
-                                    <span
-                                        id="print-speed"
-                                        class="form-control text-center small"
-                                        title="Print Speed"
-                                        aria-describedby="printSpeed"
-                                    >
-                                        0mm/s
-                                    </span>
+                            <div class="col-6">
+                                <div class="stat-tile">
+                                    <div class="stat-head">{{ macro.bi_icon("speedometer") }} Speed</div>
+                                    <div class="control-stat-value" id="print-speed" title="Print Speed">0mm/s</div>
                                 </div>
                             </div>
                         </div>

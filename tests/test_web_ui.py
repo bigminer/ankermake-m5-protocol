@@ -141,7 +141,7 @@ class WebUiTestCase(unittest.TestCase):
 
         resp = self.client.post("/login?next=/", data={"token": "shared-secret", "next": "/"}, follow_redirects=True)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"GCode Terminal", resp.data)
+        self.assertIn(b"G-Code Terminal", resp.data)
         self.assertIn(b"http://camera.local/mjpg", resp.data)
 
         version_resp = self.client.get("/api/version")

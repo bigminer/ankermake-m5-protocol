@@ -52,17 +52,17 @@ losing remote function is expected and acceptable. Two consequences follow:
    or firewall each one — not just MQTT.
 
 ## Environment / key facts
-- Printer: AnkerMake M5C, IP `192.168.68.57`, SN `AK75CU2D26100511`, DUID
-  `USPRAKM-033654-KDKXJ`, firmware V3.1.56, region US.
+- Printer: AnkerMake M5C, IP `192.168.1.50`, SN `AK00000000000000`, DUID
+  `USPRAKM-000000-XXXXX`, firmware V3.1.56, region US.
 - Anker MQTT: `make-mqtt.ankermake.com` → AWS Global Accelerator
   (`166.117.17.78` / `166.117.252.238`), TCP 8789, TLS.
 - `ssl/ankermake-mqtt.crt` is the CA that verifies Anker's **server** cert. We
   have the CA cert, **not** Anker's private key.
-- Mac mini `192.168.68.55` (en1), same LAN, passwordless sudo; can run
+- Mac mini `192.168.1.10` (en1), same LAN, passwordless sudo; can run
   mosquitto / dnsmasq / tcpdump. The eufyMake desktop app (process `FDMPrint`)
   is installed here.
 - Network topology (identified 2026-07-11): the printer's gateway and primary
-  DNS is a **TP-Link Deco** mesh at `192.168.68.1` (LAN `192.168.68.0/24`);
+  DNS is a **TP-Link Deco** mesh at `192.168.1.1` (LAN `192.168.1.0/24`);
   DHCP also hands out an **eero** at `192.168.4.1` as secondary DNS, which sits
   upstream (double-NAT: Deco WAN is on the eero's `192.168.4.0/24`). Both are
   consumer mesh systems.
@@ -114,7 +114,7 @@ cloud dependencies found in Phase 0 (e.g. point NTP local). Document the final
 config. Mechanism, given the TP-Link Deco + eero mesh (neither supports
 per-hostname DNS records):
 - Preferred, no new hardware: run `dnsmasq` on the Mac mini and set the **Deco's
-  client DNS** to `192.168.68.55` (Deco supports a custom DNS server, the same
+  client DNS** to `192.168.1.10` (Deco supports a custom DNS server, the same
   hook Pi-hole users rely on). `dnsmasq` answers `make-mqtt.ankermake.com` →
   the local broker and forwards everything else. Add a firewall rule blocking
   the Anker MQTT IPs so a cached/hardcoded IP can't bypass DNS.

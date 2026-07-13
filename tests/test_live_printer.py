@@ -9,7 +9,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "ANKERCTL_TEST_BASE_URL",
-    "http://100.115.64.31:4470",
+    "http://127.0.0.1:4470",
 ).rstrip("/")
 FIXTURES = Path(__file__).parent / "fixtures"
 

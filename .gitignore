@@ -5,3 +5,6 @@ __pycache__
 .idea/
 .venv/
 ankerctl.log
+
+# Personal setup values (copy from setup.local.conf.example). Never committed.
+/setup.local.conf

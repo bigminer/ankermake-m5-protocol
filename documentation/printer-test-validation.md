@@ -14,7 +14,7 @@ This project has two test layers:
 The configured live endpoint is:
 
 ```sh
-export ANKERCTL_TEST_BASE_URL=http://100.115.64.31:4470
+export ANKERCTL_TEST_BASE_URL=http://127.0.0.1:4470
 export ANKERCTL_TEST_TOKEN="<web-ui-token>"
 ```
 

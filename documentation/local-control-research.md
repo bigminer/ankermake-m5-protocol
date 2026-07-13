@@ -57,10 +57,10 @@ only outbound printer link is to `166.117.17.78:8789`
                 │               │                   │
    ═════════════╪═══════════════╪═══════════════════╪═════════ INTERNET ═══
                 │               │                   │
-   ─────────────┼───────────────┼───────────────────┼──── YOUR LAN (192.168.68.x)
+   ─────────────┼───────────────┼───────────────────┼──── YOUR LAN (192.168.1.x)
                 │               │                   │
                 │    ┌──────────┴───────────────────┴───────────────┐
-                │    │   Mac mini  (192.168.68.55)                   │
+                │    │   Mac mini  (192.168.1.10)                    │
                 │    │                                               │
                 │    │   ┌─────────────┐   localhost:4470            │
                 │    │   │ OrcaSlicer  │──────────────┐              │
@@ -79,7 +79,7 @@ only outbound printer link is to `166.117.17.78:8789`
                 │    └───────────────────────────────────────────────┘
                 │
                 │  ┌─────────────────────────────────────────────────┐
-                └─►│  AnkerMake M5C  (192.168.68.57)                  │
+                └─►│  AnkerMake M5C  (192.168.1.50)                   │
                    │                                                  │
                    │   ┌────────────────┐      ┌───────────────────┐  │
                    │   │ Linux comm mod │◄────►│ STM32F4 / Marlin  │  │
@@ -142,7 +142,7 @@ The app process is `FDMPrint`. Across both actions, including throughout the
 - `lsof` showed `FDMPrint` holding **only** two TCP sockets, both to
   `make-mqtt.ankermake.com` (`166.117.17.78:8789`) — Anker cloud MQTT, the same
   server and port `ankerctl` uses. **Zero** UDP sockets, **zero** connections
-  to the printer (`192.168.68.57`).
+  to the printer (`192.168.1.50`).
 - The packet capture confirmed it: the only Mac↔printer traffic was
   `ankerctl`'s own PPPP keepalive session. Decoding the extrude-window pcap
   yields **0 application frames** — just 118 `PktAlive`/`PktAliveAck` pairs from
@@ -266,9 +266,9 @@ sent. Findings:
   near-certain. Phase 1 (override) confirms it definitively.
 
 **Gate — next action needs the operator.** Phase 1 points the printer's resolver
-at a local `dnsmasq` on the Mac (`192.168.68.55`). Because both the Deco and eero
+at a local `dnsmasq` on the Mac (`192.168.1.10`). Because both the Deco and eero
 are app-managed consumer mesh, changing the DNS handed to the printer is done in
-the **Deco app** (set custom DNS → `192.168.68.55`), which only the operator can
+the **Deco app** (set custom DNS → `192.168.1.10`), which only the operator can
 do. Broker + `dnsmasq` setup on the Mac is automatable; the DNS switch is manual.
 
 ### Phase 1 — RESULT: printer accepts a local broker (PROVEN 2026-07-12) ✅
@@ -361,7 +361,7 @@ What worked — the winning architecture (Mac becomes the printer's router):
 Observed on the local broker (Anker cloud fully bypassed):
 
 - TLS handshake completed; MQTT `CONNECT` accepted as client
-  `dev_fdm_..._AK75CU2D26100511` (user `eufy_fdm_AK75CU2D26100511`, p4/c1/k40).
+  `dev_fdm_..._AK00000000000000` (user `eufy_fdm_AK00000000000000`, p4/c1/k40).
 - Printer **subscribed** to its command topics
   (`/device/maker/<sn>/query`, `/smart/maker/<sn>/command`,
   `/server/maker/<sn>/command`).
