@@ -277,10 +277,12 @@ messages. Marlin treats a semicolon as the beginning of a comment, so combining
 those commands on one line would leave the printer in relative-coordinate mode.
 
 Pause and resume use the job-aware `PRINT_CONTROL` command with the active
-file path. Stop sends both `PRINT_CONTROL` cancellation and `M2024`, because
-the former cancels the communication-module job while the latter clears
-motion already buffered by the MCU. These paths were validated on the M5C,
-but the physical power switch remains the safety backstop.
+file path. Stop sends the captured minimal payload
+`{"commandType": 1008, "value": 0}` plus `M2024`: the former cancels the
+communication-module job while the latter clears motion already buffered by
+the MCU. Do not add Pause/Resume's `userName` or `filePath` fields to Stop; a
+2026-07-13 regression did so and failed to cancel a live job while `M2024`
+cooled the nozzle. The physical power switch remains the safety backstop.
 
 ## OrcaSlicer configuration
 

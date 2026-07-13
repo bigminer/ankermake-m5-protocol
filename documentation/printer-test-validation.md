@@ -163,9 +163,17 @@ identify the job with `userName` and `filePath`:
 - Bare `value` (no identity fields) is a no-op — that is why the earlier
   1,2,3 probes did nothing.
 
-UI implementation: Pause/Resume send PRINT_CONTROL value 1/2; Stop sends
-value 0 plus `M2024`. `filePath` comes from print telemetry (1001 `name`);
-`userName` is hardcoded `"ankerctl"`.
+UI implementation: Pause/Resume send PRINT_CONTROL value 1/2; Stop sends the
+minimal value 0 payload plus `M2024`. Pause/Resume's `filePath` comes from
+print telemetry (1001 `name`), and `userName` is hardcoded `"ankerctl"`.
+Those identity fields must not be added to Stop.
+
+Regression observed 2026-07-13: Stop had been routed through the shared
+Pause/Resume helper, producing value 0 plus `userName` and `filePath`. During a
+live print it failed to cancel the communication-module job; `M2024` cooled the
+nozzle while job progress continued, recreating the cold-extrusion hazard. The
+operator powered the printer off. Stop now again uses the exact minimal payload
+that was captured and live-validated on 2026-07-10.
 
 UNVERIFIED: whether the printer requires `userName` to match the job's
 original uploader. The one clean pause used a matching userName; a

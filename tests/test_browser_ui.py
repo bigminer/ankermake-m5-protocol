@@ -431,8 +431,9 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     page.fill("#gcode-input", "M105")
     page.press("#gcode-input", "Enter")
 
-    # Pause/Resume are PRINT_CONTROL now, and Stop's PRINT_CONTROL precedes
-    # M2024; none carry cmdData, so they are asserted separately below.
+    # Pause/Resume are job-identified PRINT_CONTROL messages. Stop's minimal
+    # PRINT_CONTROL precedes M2024; none carry cmdData, so they are asserted
+    # separately below.
     assert _commands(page) == [
         {"cmdData": command, "awaitResponse": False}
         for command in (
@@ -463,7 +464,11 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     frames = _ctrl_frames(page)
     assert print_control(1) in frames  # pause
     assert print_control(2) in frames  # resume
-    assert print_control(0) in frames  # stop
+    assert {
+        "mqtt": {"commandType": 0x03F0, "value": 0},
+        "awaitResponse": False,
+    } in frames  # stop
+    assert print_control(0) not in frames
 
 
 def _ctrl_frames(page):

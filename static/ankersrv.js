@@ -895,10 +895,10 @@ $(function () {
         sockets.ctrl.ws.send(JSON.stringify(message));
     }
 
-    // PRINT_CONTROL (0x3f0) identifies the running job by name, so it needs
-    // the current filePath from print telemetry (commandType 1001). value 1
-    // pauses (firmware parks at X-10 Y200), 2 resumes, 0 cancels the job.
-    function sendPrintControl(value) {
+    // Pause/resume identify the running job by name. Stop is deliberately not
+    // routed through this helper: its captured and live-validated payload is
+    // the minimal {commandType: PRINT_CONTROL, value: 0} form.
+    function sendJobControl(value) {
         sendMqtt({
             commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL,
             value: value,
@@ -939,11 +939,11 @@ $(function () {
     // the M-code path does not act on an onboard job whose stream the
     // communication module owns.
     $("#print-pause").on("click", function () {
-        sendPrintControl(1);
+        sendJobControl(1);
         return false;
     });
     $("#print-resume").on("click", function () {
-        sendPrintControl(2);
+        sendJobControl(2);
         return false;
     });
     // Stop needs both paths: PRINT_CONTROL value=0 cancels the job on the
@@ -951,7 +951,10 @@ $(function () {
     // the MCU queue and stops motion already buffered.
     $("#print-stop").on("click", function () {
         if (window.confirm("Stop the current print?")) {
-            sendPrintControl(0);
+            sendMqtt({
+                commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL,
+                value: 0,
+            });
             sendGcode("M2024");
         }
         return false;
