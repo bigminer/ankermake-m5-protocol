@@ -151,15 +151,19 @@ def test_live_supervised_small_jogs(live_session):
     _require_flag("ANKERCTL_TEST_ALLOW_MOTION")
     _require_safety("operator_present", "bed_clear", "safe_clearance")
 
-    for command in (
-        "G91;G1 X1 F3000;G90",
-        "G91;G1 X-1 F3000;G90",
-        "G91;G1 Y1 F3000;G90",
-        "G91;G1 Y-1 F3000;G90",
-        "G91;G1 Z1 F600;G90",
-        "G91;G1 Z-1 F600;G90",
+    for move in (
+        "G1 X1 F3000",
+        "G1 X-1 F3000",
+        "G1 Y1 F3000",
+        "G1 Y-1 F3000",
+        "G1 Z1 F600",
+        "G1 Z-1 F600",
     ):
-        _send_gcode(live_session, command, await_response=True)
+        _send_gcode(live_session, "G91", await_response=True)
+        try:
+            _send_gcode(live_session, move, await_response=True)
+        finally:
+            _send_gcode(live_session, "G90", await_response=True)
 
 
 @pytest.mark.live_printer

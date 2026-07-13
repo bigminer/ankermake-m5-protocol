@@ -20,7 +20,7 @@ printer can keep working with its cloud connection severed.
   Mac-hosted, printer-only Wi-Fi network, local DNS, and Mosquitto so the
   printer and `ankerctl` meet on your LAN instead of at Anker. PPPP remains the
   direct LAN path for file transfer.
-- 🎛️ **Control tab** — pause/resume/stop, jog and home, nozzle/bed temperature
+- 🎛️ **Control tab** — pause/resume/stop, bounded jogs, nozzle/bed temperature
   targets, part-fan speed, and a live gcode terminal. Pause/resume use the
   printer's job-aware `PRINT_CONTROL` command; stop combines job cancellation
   with `M2024` to clear buffered motion
@@ -67,7 +67,7 @@ the Mac's Wi-Fi sharing/NAT network and Anker destinations blocked, the printer
 has no functional dependency on Anker's cloud.
 
 This has been verified on an M5C with a self-signed local broker certificate,
-live telemetry, a supervised home command, and an OrcaSlicer upload that
+live telemetry, supervised bounded jogs, and an OrcaSlicer upload that
 completed and started a print. It is currently a documented macOS deployment,
 not a one-click cross-platform installer. See the [local-control research
 and runbook](documentation/local-control-research.md) for the network design,

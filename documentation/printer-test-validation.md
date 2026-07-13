@@ -68,6 +68,9 @@ Motion checks:
 .venv/bin/python -m pytest tests/test_live_printer.py -v -m "motion"
 ```
 
+This test performs bounded 1 mm relative jogs only. It does not home any axis.
+Web full/Z homing is disabled after the 2026-07-13 incidents described below.
+
 Print lifecycle fixture upload:
 
 ```sh
@@ -99,6 +102,19 @@ honor `G36` over MQTT. `ANKERCTL_PREPRINT_G36` must remain `false`, and the
 G36 tests validate only fixture rejection and hook dispatch, not leveling.
 Do not re-run the resolved-upload G36 test expecting completion until a
 firmware-level command contract is confirmed (serial console visibility).
+
+## Web homing disabled (incidents 2026-07-13)
+
+Two supervised attempts drove the nozzle into the plate without the load-based
+Z probe stopping the move: raw `G28`, then app-level `MOVE_ZERO` (`ct=1026`,
+`value=2`). The operator cut power during both attempts. The Home button is
+disabled, and `/ws/ctrl` rejects bare `G28`, any `G28` containing Z, and
+`MOVE_ZERO` before they reach MQTT.
+
+Do not add homing back to the live motion test. The published M5C firmware
+shows that its specialized Z probing path depends on internal preparation
+state; a homing opcode alone is not a safe probe sequence. Re-enable only from
+a captured, complete official-app command flow followed by a new safety review.
 
 ## Follow-up: fix UI pause/resume/stop (incident 2026-07-10)
 
@@ -179,7 +195,7 @@ Remaining:
 6. Set fan to 50%, then 0%.
 7. With heating allowed, set nozzle to 40C and bed to 35C, then cool both to
    0C.
-8. With motion allowed, home and run 1mm jog checks.
+8. With motion allowed, run the bounded 1 mm jog checks. Do not web-home.
 9. With print allowed, upload `tests/fixtures/tiny_safe.gcode`.
 10. With G36 enabled only for this supervised session, upload
     `tests/fixtures/g36_resolved.gcode` and verify invalid G36 fixtures are
