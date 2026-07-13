@@ -956,11 +956,6 @@ $(function () {
         sendGcode(`G91;G1 ${axis}${step} F${feed};G90`);
         return false;
     });
-    $("#jog-home").on("click", function () {
-        sendGcode("G28");
-        return false;
-    });
-
     function confirmAttendedAction(message) {
         if (printIsActive()) {
             flash_message("This control is unavailable while a print is active", "warning");

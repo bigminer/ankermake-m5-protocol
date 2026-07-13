@@ -147,12 +147,11 @@ def test_live_supervised_low_temperature_heat_then_cooldown(live_session):
 
 @pytest.mark.live_printer
 @pytest.mark.motion
-def test_live_supervised_home_and_small_jogs(live_session):
+def test_live_supervised_small_jogs(live_session):
     _require_flag("ANKERCTL_TEST_ALLOW_MOTION")
     _require_safety("operator_present", "bed_clear", "safe_clearance")
 
     for command in (
-        "G28",
         "G91;G1 X1 F3000;G90",
         "G91;G1 X-1 F3000;G90",
         "G91;G1 Y1 F3000;G90",

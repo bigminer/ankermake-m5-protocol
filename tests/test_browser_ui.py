@@ -219,11 +219,11 @@ def test_control_buttons_enable_when_ctrl_socket_opens(page, live_http_server):
     _login(page, live_http_server)
 
     page.click("#control-tab")
-    page.wait_for_function("!document.querySelector('#jog-home').disabled")
+    page.wait_for_function("!document.querySelector('#fan-apply').disabled")
 
     assert page.locator("#print-pause").is_disabled()
     assert page.locator("#fan-apply").is_enabled()
-    assert page.locator("#jog-home").is_enabled()
+    assert page.locator("#jog-home").is_disabled()
     assert page.locator("#filament-extrude").is_disabled()
     assert page.locator("#z-offset-up").is_enabled()
 
@@ -302,7 +302,7 @@ def test_printer_state_distinguishes_telemetry_from_control(page, live_http_serv
 def test_attended_filament_and_z_controls_send_bounded_gcode(page, live_http_server):
     _login(page, live_http_server)
     page.click("#control-tab")
-    page.wait_for_function("!document.querySelector('#jog-home').disabled")
+    page.wait_for_function("!document.querySelector('#fan-apply').disabled")
     page.on("dialog", lambda dialog: dialog.accept())
 
     page.evaluate(
@@ -362,7 +362,6 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
         "el => { el.value = '50'; el.dispatchEvent(new Event('input')); }"
     )
     page.click("#fan-apply")
-    page.click("#jog-home")
     page.select_option("#jog-step", "1")
     page.click(".jog-btn[data-axis='X'][data-dir='1']")
     page.click(".jog-btn[data-axis='X'][data-dir='-1']")
@@ -396,7 +395,6 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
         {"cmdData": "M2024", "awaitResponse": False},
         {"cmdData": "M107", "awaitResponse": False},
         {"cmdData": "M106 S128", "awaitResponse": False},
-        {"cmdData": "G28", "awaitResponse": False},
         {"cmdData": "G91;G1 X1 F3000;G90", "awaitResponse": False},
         {"cmdData": "G91;G1 X-1 F3000;G90", "awaitResponse": False},
         {"cmdData": "G91;G1 Y1 F3000;G90", "awaitResponse": False},

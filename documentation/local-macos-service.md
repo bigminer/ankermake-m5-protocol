@@ -261,6 +261,12 @@ requires the configured slicer API key.
 Raw G-code, fan, jog, home and temperature controls use the known
 `GCODE_COMMAND` MQTT primitive.
 
+The Control-tab Home button is intentionally disabled. A direct standalone
+`G28` was observed driving the nozzle into the build plate and mechanically
+lifting the toolhead/gantry. Do not use the web terminal to reproduce it. The
+slicer's established start sequence is a separate workflow and must not be
+treated as evidence that an arbitrary standalone Home action is safe.
+
 Pause and resume use the job-aware `PRINT_CONTROL` command with the active
 file path. Stop sends both `PRINT_CONTROL` cancellation and `M2024`, because
 the former cancels the communication-module job while the latter clears
