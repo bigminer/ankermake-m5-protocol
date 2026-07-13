@@ -196,16 +196,6 @@ $(function () {
         });
     }
 
-    function getPrinterState(data) {
-        const keys = ["state", "status", "print_state", "printState", "machineStatus", "currentStatus"];
-        for (const key of keys) {
-            if (Object.prototype.hasOwnProperty.call(data, key)) {
-                return `${data[key]}`;
-            }
-        }
-        return null;
-    }
-
     /**
      * Updates the country code <select> element
      */
@@ -362,9 +352,12 @@ $(function () {
     // Name of the running job, from print telemetry; used by PRINT_CONTROL.
     let currentPrintFile = "";
 
+    // Telemetry socket: consumes the normalized printer-state schema from
+    // /ws/state (nozzle/bed/print/speed/state) instead of raw MQTT commandType
+    // messages. The raw feed still exists on /ws/mqtt for debugging.
     sockets.mqtt = new AutoWebSocket({
-        name: "mqtt socket",
-        url: `${location.protocol.replace('http','ws')}//${location.host}/ws/mqtt`,
+        name: "state socket",
+        url: `${location.protocol.replace('http','ws')}//${location.host}/ws/state`,
         badge: "#badge-mqtt",
 
         opened: function (event) {
@@ -373,64 +366,74 @@ $(function () {
 
         message: function (ev) {
             const data = JSON.parse(ev.data);
-            const state = getPrinterState(data);
-            if (state !== null) {
-                setText(["#control-printer-state"], state);
+
+            if ("state" in data) {
+                setText(["#control-printer-state"], data.state);
             }
-            if (data.commandType == 1001) {
-                // Returns Print Details
-                currentPrintFile = data.name || "";
-                $("#print-name").text(data.name);
-                $("#time-elapsed").text(getTime(data.totalTime));
-                $("#time-remain").text(getTime(data.time));
-                const progress = getPercentage(data.progress);
-                $("#progressbar").attr("aria-valuenow", progress);
-                $("#progressbar").attr("style", `width: ${progress}%`);
-                setText(["#progress", "#control-progress"], `${progress}%`);
+
+            if (data.print) {
+                const p = data.print;
+                if ("name" in p) {
+                    currentPrintFile = p.name || "";
+                    $("#print-name").text(p.name);
+                }
+                if ("elapsed" in p) {
+                    $("#time-elapsed").text(getTime(p.elapsed));
+                }
+                if ("remaining" in p) {
+                    $("#time-remain").text(getTime(p.remaining));
+                }
+                if ("progress" in p) {
+                    const progress = getPercentage(p.progress);
+                    $("#progressbar").attr("aria-valuenow", progress);
+                    $("#progressbar").attr("style", `width: ${progress}%`);
+                    setText(["#progress", "#control-progress"], `${progress}%`);
+                    $("#control-preview-bar")
+                        .text(`${progress}%`)
+                        .attr("aria-valuenow", progress)
+                        .attr("style", `width: ${progress}%`);
+                }
                 // Control tab: object preview (printer-provided image URL) + overlay
-                if (data.img) {
-                    if ($("#control-preview-img").attr("src") !== data.img) {
-                        $("#control-preview-img").attr("src", data.img);
+                if ("img" in p) {
+                    if ($("#control-preview-img").attr("src") !== p.img) {
+                        $("#control-preview-img").attr("src", p.img);
                     }
-                    $("#control-preview-name").text(data.name || "");
+                    $("#control-preview-name").text(p.name || "");
                     $("#control-preview-wrap").show();
                 }
-                $("#control-preview-bar")
-                    .text(`${progress}%`)
-                    .attr("aria-valuenow", progress)
-                    .attr("style", `width: ${progress}%`);
-            } else if (data.commandType == 1003) {
-                // Returns Nozzle Temp
-                const current = getTemp(data.currentTemp);
-                setText(["#nozzle-temp", "#control-nozzle-current"], `${current}°C`);
-                if (Object.prototype.hasOwnProperty.call(data, "targetTemp")) {
-                    const target = getTemp(data.targetTemp);
+                if (p.layer) {
+                    setText(["#print-layer", "#control-layer"], `${p.layer.current} / ${p.layer.total}`);
+                }
+            }
+
+            if (data.nozzle) {
+                if ("current" in data.nozzle) {
+                    setText(["#nozzle-temp", "#control-nozzle-current"], `${getTemp(data.nozzle.current)}°C`);
+                }
+                if ("target" in data.nozzle) {
+                    const target = getTemp(data.nozzle.target);
                     if (!isNaN(target)) {
                         setText(["#set-nozzle-temp", "#control-nozzle-target"], `${target}°C`);
                         $("#control-nozzle-input").val(target);
                     }
                 }
-            } else if (data.commandType == 1004) {
-                // Returns Bed Temp
-                const current = getTemp(data.currentTemp);
-                setText(["#bed-temp", "#control-bed-current"], `${current}°C`);
-                if (Object.prototype.hasOwnProperty.call(data, "targetTemp")) {
-                    const target = getTemp(data.targetTemp);
+            }
+
+            if (data.bed) {
+                if ("current" in data.bed) {
+                    setText(["#bed-temp", "#control-bed-current"], `${getTemp(data.bed.current)}°C`);
+                }
+                if ("target" in data.bed) {
+                    const target = getTemp(data.bed.target);
                     if (!isNaN(target)) {
                         setText(["#set-bed-temp", "#control-bed-target"], `${target}°C`);
                         $("#control-bed-input").val(target);
                     }
                 }
-            } else if (data.commandType == 1006) {
-                // Returns Print Speed
-                const X = getSpeedFactor(data.value);
-                setText(["#print-speed", "#control-print-speed"], `${data.value}mm/s ${X}`);
-            } else if (data.commandType == 1052) {
-                // Returns Layer Info
-                const layer = `${data.real_print_layer} / ${data.total_layer}`;
-                setText(["#print-layer", "#control-layer"], layer);
-            } else {
-                console.log("Unhandled mqtt message:", data);
+            }
+
+            if ("speed" in data) {
+                setText(["#print-speed", "#control-print-speed"], `${data.speed}mm/s ${getSpeedFactor(data.speed)}`);
             }
         },
 

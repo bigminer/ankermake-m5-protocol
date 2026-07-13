@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ankerm5c.chrony</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/sbin/chronyd</string>
+        <string>-n</string>
+        <string>-x</string>
+        <string>-f</string>
+        <string>/opt/ankerm5c/chrony.conf</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/opt/ankerm5c/logs/chrony.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/opt/ankerm5c/logs/chrony.err.log</string>
+</dict>
+</plist>

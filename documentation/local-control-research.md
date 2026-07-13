@@ -434,6 +434,48 @@ Net effect: the printer's only surviving cloud-shaped connection is MQTT — and
 that now terminates on the **local** broker. The Anker cloud is severed for the
 printer while it keeps running normally.
 
+### Complete sever-list + egress-allowlist redesign (2026-07-12)
+
+A ~7-hour DNS query log from the hotspot's logging resolver (13:25–20:21) gives
+the printer's full outbound name set, completing the recon that the 2-minute
+Phase-0 capture could not:
+
+| Host | Queries | Role |
+| --- | --- | --- |
+| `make-app.ankermake.com` | 1934 | Anker app/cloud API |
+| `www.anker.com` | 991 | Anker (a domain the old blackhole missed) |
+| `p2p-mk-ohi/cal.eufylife.com` | 93 | P2P relay rendezvous |
+| `make-mqtt(-eu).ankermake.com` | 8 | MQTT (redirect target) |
+| `ota.eufylife.com` | 1 | **firmware/OTA — confirmed** |
+| `time.nist.gov`, `pool.ntp.org` | 1 each | **NTP — confirmed** |
+| `www.{google,microsoft,apple}.com` | ~1500 | internet-connectivity checks |
+
+Two findings changed the block design:
+
+1. **An IP blocklist cannot sever the cloud.** `make-mqtt`/`make-app`/`anker.com`
+   are fronted by **AWS Global Accelerator**, which answers from rotating anycast
+   IPs across AWS ranges — the printer was seen reaching `3.33.186.135` and
+   `15.197.167.90` (both the same GA endpoint) as well as the earlier
+   `166.117.x`. Chasing IPs is futile.
+2. **The printer needs NTP and checks OTA.** Under a naive block these would
+   fail; NTP silently must be handled or the clock drifts.
+
+The block layer was therefore redesigned from specific-IP drops to a
+**default-deny egress allowlist** for the printer: once fully local, its only
+legitimate peers are on the hotspot subnet (broker, DNS, NTP, PPPP file transfer
+all on the Mac at `192.168.2.1`), so `anker_block` passes
+`192.168.2.2 → 192.168.2.0/24` and drops everything else off-subnet. This is
+immune to GA rotation and also kills OTA and connectivity checks in one rule.
+The printer's PPPP camera stays on the LAN subnet (unaffected); only its cloud
+WAN relay is dropped, forcing direct-LAN P2P. NTP is preserved by an `anker_dns`
+rdr that rewrites the printer's `:123` to a **local chrony** on the Mac (run with
+`-x` so it serves time without disciplining the Mac's own clock). `anker.com`
+was added to the dnsmasq blackhole for defense-in-depth.
+
+This design is implemented as boot-persistent LaunchDaemons in
+[`deploy/local-broker/`](../deploy/local-broker/) (mosquitto, dnsmasq, chrony,
+and a pf-loader), with `install.sh` / `verify.sh` / `uninstall.sh` and a runbook.
+
 ### USB-C is not an open control path (verified 2026-07-12)
 
 Checked whether the printer's USB-C port could drive Marlin directly (which would

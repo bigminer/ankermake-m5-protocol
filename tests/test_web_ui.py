@@ -309,7 +309,7 @@ class WebUiTestCase(unittest.TestCase):
         handlers = []
 
         class FakeMqttService:
-            client = fake_client
+            transport = fake_client
 
             @contextlib.contextmanager
             def tap(self, handler):
@@ -360,7 +360,7 @@ class WebUiTestCase(unittest.TestCase):
         }
 
         class FakeMqttService:
-            client = fake_client
+            transport = fake_client
 
             @contextlib.contextmanager
             def tap(self, handler):
@@ -396,7 +396,7 @@ class WebUiTestCase(unittest.TestCase):
         }
 
         class FakeMqttService:
-            client = fake_client
+            transport = fake_client
 
             @contextlib.contextmanager
             def tap(self, handler):
@@ -429,7 +429,7 @@ class WebUiTestCase(unittest.TestCase):
         handlers = []
 
         class FakeMqttService:
-            client = fake_client
+            transport = fake_client
 
             @contextlib.contextmanager
             def tap(self, handler):

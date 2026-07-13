@@ -418,7 +418,7 @@ def http_calc_sec_code(duid, mac):
 @main.group("config", help="View and update configuration")
 @click.pass_context
 def config(ctx):
-    if ctx.invoked_subcommand in {"import", "decode"}:
+    if ctx.invoked_subcommand in {"import", "decode", "manual"}:
         return
 
     env = ctx.obj
@@ -574,6 +574,42 @@ def config_import(env, fd):
 
     # import the remaining configuration from the server
     cli.config.import_config_from_server(env.config, cache, env.insecure)
+
+
+@config.command("manual")
+@click.option("--sn", required=True, help="Printer serial number")
+@click.option("--mqtt-key", "mqtt_key", required=True, metavar="HEX",
+              help="Printer MQTT key, as hex")
+@click.option("--user-id", "user_id", required=True,
+              help="Anker user id (the MQTT username becomes eufy_<user-id>)")
+@click.option("--email", required=True, help="Account email (used as the MQTT password)")
+@click.option("--region", default="us", type=click.Choice(["us", "eu"]), show_default=True)
+@click.option("--name", default="printer", show_default=True, help="Printer display name")
+@click.option("--model", default="", help="Printer model string")
+@click.option("--ip", "ip_addr", default="", metavar="ADDR",
+              help="Printer LAN IP address (required for PPPP file uploads)")
+@click.option("--p2p-duid", "p2p_duid", default="", help="PPPP DUID (required for uploads)")
+@click.option("--p2p-key", "p2p_key", default="", help="PPPP DSK key (required for uploads)")
+@pass_env
+def config_manual(env, sn, mqtt_key, user_id, email, region, name, model, ip_addr, p2p_duid, p2p_key):
+    """
+    Create configuration from manually provided values, with no Anker API call.
+
+    Use this to run ankerctl for an already-provisioned printer whose
+    credentials you hold, without an Anker login. Supply the MQTT fields
+    (--sn/--mqtt-key/--user-id/--email) for monitoring and control; add
+    --ip/--p2p-duid/--p2p-key to also upload and start prints over PPPP.
+    """
+    try:
+        cfg = cli.config.build_manual_config(
+            sn=sn, mqtt_key=mqtt_key, user_id=user_id, email=email, region=region,
+            name=name, model=model, ip_addr=ip_addr, p2p_duid=p2p_duid, p2p_key=p2p_key,
+        )
+    except ValueError as E:
+        raise click.ClickException(str(E))
+
+    env.config.save("default", cfg)
+    log.info(f"Saved manual configuration for printer [{sn}] ({region.upper()})")
 
     log.info("Finished import")
 
