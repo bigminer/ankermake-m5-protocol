@@ -139,6 +139,46 @@ def load_config_from_api(auth_token, region, insecure):
     return config
 
 
+def build_manual_config(*, sn, mqtt_key, user_id, email, region="us",
+                        name="printer", model="", ip_addr="",
+                        p2p_duid="", p2p_key=""):
+    """Build a Config from explicit values, with no Anker API call.
+
+    Enables running ankerctl for an already-provisioned printer whose
+    credentials you hold (e.g. from a backup), without an Anker account/login.
+    `mqtt_key` is a hex string; the MQTT username/password derive from user_id
+    and email (see Account). The ip_addr and p2p_* fields are only needed for
+    PPPP file uploads — leave them empty for MQTT-only monitoring and control.
+    """
+    if region not in ("us", "eu"):
+        raise ValueError(f"region must be 'us' or 'eu', not {region!r}")
+
+    now = datetime.now()
+    account = Account(
+        auth_token="",
+        region=region,
+        user_id=user_id,
+        email=email,
+        country="",
+    )
+    printer = Printer(
+        id="",
+        sn=sn,
+        name=name,
+        model=model,
+        create_time=now,
+        update_time=now,
+        wifi_mac="",
+        ip_addr=ip_addr,
+        mqtt_key=unhex(mqtt_key),
+        api_hosts="",
+        p2p_hosts="",
+        p2p_duid=p2p_duid,
+        p2p_key=p2p_key,
+    )
+    return Config(account=account, printers=[printer])
+
+
 def fetch_config_by_login(email, password, region, insecure, captcha_id=None, captcha_answer=None):
     log.info("Initializing API..")
     if not region:
