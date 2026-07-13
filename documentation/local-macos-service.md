@@ -256,19 +256,25 @@ Authentication behavior:
 The connection test only needs the exempt version endpoint. A remote upload
 requires the configured slicer API key.
 
-### Control tab warning
+### Control tab homing safety
 
 Raw G-code, fan, jog and temperature controls use the known
 `GCODE_COMMAND` MQTT primitive.
 
-The Control-tab Home button is intentionally disabled. A direct standalone
-`G28` was observed driving the nozzle into the build plate and mechanically
-lifting the toolhead/gantry without the expected probe detection stopping the
-move. Do not use the web terminal to reproduce it. Normal Z probing and the
-slicer's established start sequence are separate workflows; this incident does
-not indicate that their working probe sequence is unsafe.
-The web terminal also rejects bare `G28` and any `G28 Z` command. Explicit
-X/Y-only homing remains possible, but it never establishes a Z home position.
+The Control-tab Home button uses the same app-level `MOVE_ZERO` operation as
+eufyMake (`commandType: 1026`, `value: 2`). This delegates the complete X/Y/Z
+sequence and nozzle-probe setup to the printer communication module. It does
+not send raw `G28`.
+
+A direct standalone `G28` was observed driving the nozzle into the build plate
+without the expected probe detection stopping the move. The web terminal still
+rejects bare `G28` and any `G28 Z` command so the app-level safety path cannot
+be bypassed accidentally. Explicit X/Y-only `G28 X Y` remains available for
+diagnostics, but it never establishes a Z home position.
+
+Jogging sends `G91`, the bounded `G1` move, and `G90` as three separate MQTT
+messages. Marlin treats a semicolon as the beginning of a comment, so combining
+those commands on one line would leave the printer in relative-coordinate mode.
 
 Pause and resume use the job-aware `PRINT_CONTROL` command with the active
 file path. Stop sends both `PRINT_CONTROL` cancellation and `M2024`, because

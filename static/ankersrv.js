@@ -428,6 +428,7 @@ $(function () {
         $("#print-pause, #print-resume, #print-stop").prop("disabled", !controlReady || !printActive);
         const canAdjustZ = controlReady && !printActive;
         const canMoveFilament = canAdjustZ && currentNozzleTemp >= 17000;
+        $("#jog-home, .jog-btn").prop("disabled", !canAdjustZ);
         $("#z-offset-down, #z-offset-up").prop("disabled", !canAdjustZ);
         $("#filament-retract, #filament-extrude").prop("disabled", !canMoveFilament);
     }
@@ -961,13 +962,17 @@ $(function () {
         return false;
     });
 
-    // Jog + home (relative moves)
+    // Jog in relative mode, restoring absolute mode in a separate command.
+    // A semicolon starts a Marlin comment, so combining these on one line
+    // would execute G91 but silently discard the move and trailing G90.
     $(".jog-btn").on("click", function () {
         const axis = $(this).data("axis");
         const dir = parseInt($(this).data("dir"));
         const step = parseFloat($("#jog-step").val()) * dir;
         const feed = (axis === "Z") ? 600 : 3000;
-        sendGcode(`G91;G1 ${axis}${step} F${feed};G90`);
+        sendGcode("G91");
+        sendGcode(`G1 ${axis}${step} F${feed}`);
+        sendGcode("G90");
         return false;
     });
     function confirmAttendedAction(message) {
@@ -980,6 +985,21 @@ $(function () {
         }
         return true;
     }
+
+    // MOVE_ZERO (0x402) is the app-level homing operation used by eufyMake.
+    // value=2 requests full homing; the printer communication module owns the
+    // complete M5C X/Y/Z sequence and its nozzle-probe setup. Do not replace
+    // this with raw G28, which bypassed that setup in standalone web control.
+    $("#jog-home").on("click", function () {
+        if (!confirmAttendedAction("Home all axes? Keep the build plate clear and stay at the printer.")) {
+            return false;
+        }
+        sendMqtt({
+            commandType: MqttMsgType.ZZ_MQTT_CMD_MOVE_ZERO,
+            value: 2,
+        });
+        return false;
+    });
 
     $("#filament-extrude, #filament-retract").on("click", function () {
         const amount = parseFloat($("#filament-amount").val());

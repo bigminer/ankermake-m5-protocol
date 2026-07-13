@@ -223,9 +223,24 @@ def test_control_buttons_enable_when_ctrl_socket_opens(page, live_http_server):
 
     assert page.locator("#print-pause").is_disabled()
     assert page.locator("#fan-apply").is_enabled()
-    assert page.locator("#jog-home").is_disabled()
+    assert page.locator("#jog-home").is_enabled()
     assert page.locator("#filament-extrude").is_disabled()
     assert page.locator("#z-offset-up").is_enabled()
+
+
+def test_home_uses_app_level_move_zero_not_raw_gcode(page, live_http_server):
+    _login(page, live_http_server)
+    page.click("#control-tab")
+    page.on("dialog", lambda dialog: dialog.accept())
+    page.wait_for_function("!document.querySelector('#jog-home').disabled")
+
+    page.click("#jog-home")
+
+    assert {
+        "mqtt": {"commandType": 0x0402, "value": 2},
+        "awaitResponse": False,
+    } in _ctrl_frames(page)
+    assert _commands(page) == []
 
 
 def test_web_terminal_blocks_z_homing_but_allows_xy_homing(page, live_http_server):
@@ -373,6 +388,18 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     page.click("#print-pause")
     page.click("#print-resume")
     page.click("#print-stop")
+    assert page.locator("#jog-home").is_disabled()
+
+    # Motion controls become available again once the job is no longer active.
+    page.evaluate(
+        """
+        window.__wsInstances
+            .find((ws) => ws.url.includes("/ws/state"))
+            .emit({state: "idle", print: {name: ""}});
+        """
+    )
+    page.wait_for_function("!document.querySelector('#jog-home').disabled")
+
     page.click("#fan-apply")
     page.locator("#fan-slider").evaluate(
         "el => { el.value = '50'; el.dispatchEvent(new Event('input')); }"
@@ -408,17 +435,18 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     # Pause/Resume are PRINT_CONTROL now, and Stop's PRINT_CONTROL precedes
     # M2024; none carry cmdData, so they are asserted separately below.
     assert _commands(page) == [
-        {"cmdData": "M2024", "awaitResponse": False},
-        {"cmdData": "M107", "awaitResponse": False},
-        {"cmdData": "M106 S128", "awaitResponse": False},
-        {"cmdData": "G91;G1 X1 F3000;G90", "awaitResponse": False},
-        {"cmdData": "G91;G1 X-1 F3000;G90", "awaitResponse": False},
-        {"cmdData": "G91;G1 Y1 F3000;G90", "awaitResponse": False},
-        {"cmdData": "G91;G1 Y-1 F3000;G90", "awaitResponse": False},
-        {"cmdData": "G91;G1 Z1 F600;G90", "awaitResponse": False},
-        {"cmdData": "G91;G1 Z-1 F600;G90", "awaitResponse": False},
-        {"cmdData": "M104 S40", "awaitResponse": False},
-        {"cmdData": "M140 S35", "awaitResponse": False},
+        {"cmdData": command, "awaitResponse": False}
+        for command in (
+            "M2024", "M107", "M106 S128",
+            "G91", "G1 X1 F3000", "G90",
+            "G91", "G1 X-1 F3000", "G90",
+            "G91", "G1 Y1 F3000", "G90",
+            "G91", "G1 Y-1 F3000", "G90",
+            "G91", "G1 Z1 F600", "G90",
+            "G91", "G1 Z-1 F600", "G90",
+            "M104 S40", "M140 S35",
+        )
+    ] + [
         {"cmdData": "M105", "awaitResponse": True},
     ]
 
