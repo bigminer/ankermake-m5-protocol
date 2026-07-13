@@ -897,13 +897,27 @@ $(function () {
         });
     }
 
+    function attemptsZHome(line) {
+        const command = String(line).split(";", 1)[0].trim().toUpperCase();
+        if (!command.startsWith("G28")) {
+            return false;
+        }
+        const axes = command.slice(3).match(/[XYZ]/g) || [];
+        return axes.length === 0 || axes.includes("Z");
+    }
+
     function sendGcode(line, awaitResponse = false) {
+        if (attemptsZHome(line)) {
+            flash_message("Direct web Z homing is disabled because it did not engage the M5C probe sequence", "warning");
+            return false;
+        }
         sendMqtt({
             commandType: MqttMsgType.ZZ_MQTT_CMD_GCODE_COMMAND,
             cmdData: line,
             cmdLen: line.length,
         }, awaitResponse);
         appendGcodeLog(`> ${line}`);
+        return true;
     }
 
     $("#control-refresh").on("click", function () {

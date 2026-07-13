@@ -228,6 +228,22 @@ def test_control_buttons_enable_when_ctrl_socket_opens(page, live_http_server):
     assert page.locator("#z-offset-up").is_enabled()
 
 
+def test_web_terminal_blocks_z_homing_but_allows_xy_homing(page, live_http_server):
+    _login(page, live_http_server)
+    page.click("#control-tab")
+    page.wait_for_function("!document.querySelector('#gcode-input').disabled")
+
+    page.fill("#gcode-input", "G28")
+    page.press("#gcode-input", "Enter")
+    page.fill("#gcode-input", "G28 Z")
+    page.press("#gcode-input", "Enter")
+    assert _commands(page) == []
+
+    page.fill("#gcode-input", "G28 X Y")
+    page.press("#gcode-input", "Enter")
+    assert _commands(page) == [{"cmdData": "G28 X Y", "awaitResponse": True}]
+
+
 def test_printer_state_requires_a_heartbeat_reply(page, live_http_server):
     _login(page, live_http_server)
 
