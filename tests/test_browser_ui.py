@@ -1,4 +1,5 @@
 import contextlib
+import re
 import socket
 import threading
 from datetime import datetime
@@ -175,7 +176,8 @@ def _commands(page):
     return page.evaluate(
         """
         window.__wsSent
-            .filter((item) => item.payload.mqtt && item.payload.mqtt.cmdData !== undefined)
+            .filter((item) => item.payload.mqtt && item.payload.mqtt.cmdData !== undefined
+                && item.payload.requestId !== "printer-heartbeat")
             .map((item) => ({
                 cmdData: item.payload.mqtt.cmdData,
                 awaitResponse: !!item.payload.awaitResponse,
@@ -198,21 +200,148 @@ def test_login_page_renders_and_accepts_valid_token(page, live_http_server):
     assert "g-code terminal" in page.locator("body").inner_text().lower()
 
 
+def test_static_assets_have_a_cache_busting_version(page, live_http_server):
+    _login(page, live_http_server)
+    src = page.locator("script[src*='ankersrv.js']").get_attribute("src")
+    assert src is not None and re.search(r"\?v=\d+$", src)
+
+
+def test_home_hides_transport_protocol_details(page, live_http_server):
+    _login(page, live_http_server)
+    home_text = page.locator("#home").inner_text()
+    assert "MQTT" not in home_text
+    assert "PPPP" not in home_text
+    assert "CTRL" not in home_text
+    assert page.locator("#printer-connection").count() == 0
+
+
 def test_control_buttons_enable_when_ctrl_socket_opens(page, live_http_server):
     _login(page, live_http_server)
 
     page.click("#control-tab")
-    page.wait_for_function("!document.querySelector('#print-pause').disabled")
+    page.wait_for_function("!document.querySelector('#jog-home').disabled")
 
-    assert page.locator("#print-pause").is_enabled()
+    assert page.locator("#print-pause").is_disabled()
     assert page.locator("#fan-apply").is_enabled()
     assert page.locator("#jog-home").is_enabled()
+    assert page.locator("#filament-extrude").is_disabled()
+    assert page.locator("#z-offset-up").is_enabled()
+
+
+def test_printer_state_requires_a_heartbeat_reply(page, live_http_server):
+    _login(page, live_http_server)
+
+    page.wait_for_function(
+        "window.__wsSent.some((item) => item.payload.requestId === 'printer-heartbeat')"
+    )
+    assert page.locator("#control-printer-state").inner_text() == "Checking…"
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/ctrl"))
+            .emit({requestId: "printer-heartbeat", mqttReply: {resData: "ok T:20"}});
+        """
+    )
+    page.wait_for_function(
+        "document.querySelector('#control-printer-state').textContent === 'Ready'"
+    )
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/ctrl"))
+            .emit({requestId: "printer-heartbeat", mqttReply: null});
+        """
+    )
+    page.wait_for_function(
+        "document.querySelector('#control-printer-state').textContent === 'Offline'"
+    )
+
+
+def test_print_controls_require_active_job_telemetry(page, live_http_server):
+    _login(page, live_http_server)
+    assert page.locator("#print-pause").is_disabled()
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state"))
+            .emit({print: {name: "job.gcode"}});
+        """
+    )
+    page.wait_for_function("!document.querySelector('#print-pause').disabled")
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state"))
+            .emit({print: {name: ""}});
+        """
+    )
+    page.wait_for_function("document.querySelector('#print-pause').disabled")
+
+
+def test_printer_state_times_out_when_heartbeat_response_stalls(page, live_http_server):
+    _login(page, live_http_server)
+    page.wait_for_timeout(5500)
+    assert page.locator("#control-printer-state").inner_text() == "Offline"
+
+
+def test_printer_state_distinguishes_telemetry_from_control(page, live_http_server):
+    _login(page, live_http_server)
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state"))
+            .emit({nozzle: {current: 2000, target: 0}});
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/ctrl")).close();
+        """
+    )
+    page.wait_for_function(
+        "document.querySelector('#control-printer-state').textContent === 'Ready'"
+    )
+
+
+def test_attended_filament_and_z_controls_send_bounded_gcode(page, live_http_server):
+    _login(page, live_http_server)
+    page.click("#control-tab")
+    page.wait_for_function("!document.querySelector('#jog-home').disabled")
+    page.on("dialog", lambda dialog: dialog.accept())
+
+    page.evaluate(
+        """
+        const state = window.__wsInstances.find((ws) => ws.url.includes("/ws/state"));
+        state.emit({state: "idle", nozzle: {current: 20000, target: 0}});
+        """
+    )
+    page.wait_for_function("!document.querySelector('#filament-extrude').disabled")
+
+    page.click("#filament-extrude")
+    page.click("#filament-retract")
+    page.click("#z-offset-up")
+    page.click("#z-offset-down")
+
+    assert _commands(page) == [
+        {"cmdData": "M83", "awaitResponse": False},
+        {"cmdData": "G1 E5 F300", "awaitResponse": False},
+        {"cmdData": "M82", "awaitResponse": False},
+        {"cmdData": "M83", "awaitResponse": False},
+        {"cmdData": "G1 E-5 F300", "awaitResponse": False},
+        {"cmdData": "M82", "awaitResponse": False},
+        {"cmdData": "M290 Z0.05", "awaitResponse": False},
+        {"cmdData": "M290 Z-0.05", "awaitResponse": False},
+    ]
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state"))
+            .emit({state: "printing"});
+        """
+    )
+    page.wait_for_function("document.querySelector('#filament-extrude').disabled")
+    assert page.locator("#z-offset-up").is_disabled()
 
 
 def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     _login(page, live_http_server)
     page.click("#control-tab")
-    page.wait_for_function("!document.querySelector('#print-pause').disabled")
     page.on("dialog", lambda dialog: dialog.accept())
 
     # A running job supplies the filePath that PRINT_CONTROL needs.
@@ -223,6 +352,7 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
             .emit({print: {name: "job.gcode"}});
         """
     )
+    page.wait_for_function("!document.querySelector('#print-pause').disabled")
 
     page.click("#print-pause")
     page.click("#print-resume")
@@ -240,10 +370,23 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
     page.click(".jog-btn[data-axis='Y'][data-dir='-1']")
     page.click(".jog-btn[data-axis='Z'][data-dir='1']")
     page.click(".jog-btn[data-axis='Z'][data-dir='-1']")
-    page.fill("#control-nozzle-input", "40")
-    page.press("#control-nozzle-input", "Enter")
-    page.fill("#control-bed-input", "35")
-    page.press("#control-bed-input", "Enter")
+    page.click("#control-nozzle-input")
+    page.wait_for_function(
+        "document.querySelector('#temperature-picker').dataset.temperatureTarget === 'control-nozzle-input'"
+    )
+    assert page.locator("#temperature-picker-range").get_attribute("max") == "300"
+    assert page.locator("#popupModalInputCustom").is_visible()
+    page.locator("#temperature-picker-range").evaluate("el => el.value = '40'")
+    page.click("#popupModalInputOK")
+    page.wait_for_selector("#popupModalInput", state="hidden")
+    page.click("#control-bed-input")
+    page.wait_for_function(
+        "document.querySelector('#temperature-picker').dataset.temperatureTarget === 'control-bed-input'"
+    )
+    assert page.locator("#temperature-picker-range").get_attribute("max") == "100"
+    page.locator("#temperature-picker-range").evaluate("el => el.value = '35'")
+    page.click("#popupModalInputOK")
+    page.wait_for_selector("#popupModalInput", state="hidden")
     page.fill("#gcode-input", "M105")
     page.press("#gcode-input", "Enter")
 
@@ -286,7 +429,8 @@ def _ctrl_frames(page):
     return page.evaluate(
         """
         window.__wsSent
-            .filter((item) => item.url.includes("/ws/ctrl"))
+            .filter((item) => item.url.includes("/ws/ctrl")
+                && item.payload.requestId !== "printer-heartbeat")
             .map((item) => item.payload)
         """
     )
@@ -309,36 +453,38 @@ def test_home_tab_light_and_quality_buttons_send_ctrl_payloads(page, live_http_s
     ]
 
 
-def _submit_preheat_modal(page, trigger, value):
-    page.click(trigger)
-    page.wait_for_function(
-        "document.activeElement === document.querySelector('#modal-input-elem')"
-    )
-    page.fill("#modal-input-elem", value)
-    page.click("#popupModalInputOK")
-    page.wait_for_selector("#popupModalInput", state="hidden")
-
-
-def test_home_tab_preheat_modal_sends_preheat_config(page, live_http_server):
+def test_temperature_modal_starts_with_an_empty_value(page, live_http_server):
     _login(page, live_http_server)
-    # The mqtt socket only reports "opened" (enabling the preheat buttons)
-    # once it receives a first message.
     page.evaluate(
         """
-        window.__wsInstances
-            .find((ws) => ws.url.includes("/ws/state"))
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state"))
             .emit({nozzle: {current: 2000, target: 0}});
         """
     )
     page.wait_for_function("!document.querySelector('#set-nozzle-temp').disabled")
+    assert page.locator("#set-nozzle-temp").get_attribute("data-clear-on-open") == "true"
+    page.click("#set-nozzle-temp")
+    page.wait_for_selector("#temperature-picker:not(.d-none)")
+    assert page.locator("#modal-input-elem").input_value() == ""
 
-    _submit_preheat_modal(page, "#set-nozzle-temp", "210")
-    _submit_preheat_modal(page, "#set-bed-temp", "60")
 
-    assert _ctrl_frames(page) == [
-        {"mqtt": {"commandType": 0x040E, "nozzle": 21000, "value": 1}},
-        {"mqtt": {"commandType": 0x040E, "heatbed": 6000, "value": 1}},
-    ]
+def test_temperature_modal_can_submit_slider_value(page, live_http_server):
+    _login(page, live_http_server)
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state"))
+            .emit({nozzle: {current: 2000, target: 0}});
+        """
+    )
+    page.wait_for_function("!document.querySelector('#set-nozzle-temp').disabled")
+    page.click("#set-nozzle-temp")
+    page.wait_for_selector("#temperature-picker:not(.d-none)")
+    page.locator("#temperature-picker-range").evaluate(
+        "el => { el.value = '200'; el.dispatchEvent(new Event('input')); }"
+    )
+    page.click("#popupModalInputOK")
+    page.wait_for_selector("#popupModalInput", state="hidden")
+    assert _commands(page) == [{"cmdData": "M104 S200", "awaitResponse": False}]
 
 
 def test_print_tab_upload_button_posts_gcode_file(page, live_http_server):

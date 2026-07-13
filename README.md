@@ -21,12 +21,11 @@ printer can keep working with its cloud connection severed.
   printer and `ankerctl` meet on your LAN instead of at Anker. PPPP remains the
   direct LAN path for file transfer.
 - 🎛️ **Control tab** — pause/resume/stop, jog and home, nozzle/bed temperature
-  targets, part-fan speed, and a live gcode terminal. Pause/resume/stop use
-  `M2022`/`M2023`/`M2024`, verified against the published M5C firmware source
-  (not guesswork)
-- 🔐 **Remote access with a login token** — set one environment variable and
-  the web UI requires a login, while slicer uploads keep working; pairs well
-  with [Tailscale](https://tailscale.com/) for printing from anywhere
+  targets, part-fan speed, and a live gcode terminal. Pause/resume use the
+  printer's job-aware `PRINT_CONTROL` command; stop combines job cancellation
+  with `M2024` to clear buffered motion
+- 🔐 **Protected remote printing** — local slicers work without setup; remote
+  slicers require a dedicated API key, as does the web UI when configured
 - 📷 **External webcam support** — embed any MJPEG/WebRTC stream in the
   dashboard, giving the camera-less M5C a live view
 - 📐 **Pre-print auto-leveling** — optionally preheat and run the printer's
@@ -108,7 +107,8 @@ walkthroughs live in [documentation/install-from-git.md](documentation/install-f
 2. Configure the physical printer:
    - **Host Type:** `OctoPrint`
    - **Hostname, IP or URL:** `127.0.0.1:4470` (or wherever ankerctl runs)
-   - **API Key:** leave empty
+   - **API Key:** leave empty only for a local slicer. For a remote slicer,
+     set `ANKERCTL_SLICER_TOKEN` and enter that value here.
 3. Click **Test**, then **OK**.
 4. Slice, then **Print plate**.
 
@@ -130,15 +130,18 @@ directory:
 | `FLASK_HOST` | `127.0.0.1` | Interface to bind; `0.0.0.0` allows other devices on your network |
 | `FLASK_PORT` | `4470` | Webserver port |
 | `PRINTER_INDEX` | `0` | Which printer to use if your account has several |
-| `ANKERCTL_TOKEN` | *(unset)* | Require this token to log in to the web UI; slicer endpoints stay open |
+| `ANKERCTL_TOKEN` | *(unset)* | Require this token to log in to the web UI |
+| `ANKERCTL_SLICER_TOKEN` | *(unset)* | Required `X-Api-Key` for non-loopback slicer uploads; configure the same value as the slicer's API key |
+| `ANKERCTL_MAX_UPLOAD_BYTES` | `536870912` | Largest accepted upload request, in bytes |
 | `ANKERCTL_SECRET_KEY` | *(random)* | Stable session key so web logins survive restarts |
 | `ANKERCTL_WEBCAM_URL` | *(unset)* | External webcam stream to embed (also settable in the Setup tab) |
 | `ANKERCTL_PREPRINT_G36` | off | Preheat + auto-level before each slicer-uploaded print |
 | `ANKERCTL_PREPRINT_COMMAND_TIMEOUT` | `300` | Seconds to wait for heating/leveling in the pre-print hook |
 
 > **Warning**
-> Keep the web UI on your LAN or a private network like Tailscale — don't
-> expose it directly to the internet, even with a token set.
+> Remote slicer uploads are refused until `ANKERCTL_SLICER_TOKEN` is set.
+> Keep the web UI on your LAN or a private network like Tailscale — do not
+> expose it directly to the internet.
 
 To run ankerctl as an always-on service, see the
 [macOS launchd runbook](documentation/local-macos-service.md) (a complete

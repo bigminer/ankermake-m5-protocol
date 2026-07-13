@@ -1,6 +1,8 @@
+import hashlib
+import io
 import unittest
 
-from libflagship.ppppapi import Channel
+from libflagship.ppppapi import Channel, FileUploadInfo
 
 
 class ChannelWriteTimeoutTests(unittest.TestCase):
@@ -26,6 +28,20 @@ class ChannelWriteTimeoutTests(unittest.TestCase):
 
         self.assertEqual((int(start), int(done)), (0, 1))
 
+
+class FileUploadInfoTests(unittest.TestCase):
+    def test_from_stream_hashes_and_rewinds(self):
+        data = b"chunked upload data"
+        stream = io.BytesIO(data)
+
+        info = FileUploadInfo.from_stream(
+            stream, "test.gcode", user_name="test", user_id="-", machine_id="-",
+            blocksize=4,
+        )
+
+        self.assertEqual(info.size, len(data))
+        self.assertEqual(info.md5, hashlib.md5(data).hexdigest())
+        self.assertEqual(stream.read(), data)
 
 if __name__ == "__main__":
     unittest.main()

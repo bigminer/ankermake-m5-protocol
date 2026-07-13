@@ -351,6 +351,86 @@ $(function () {
 
     // Name of the running job, from print telemetry; used by PRINT_CONTROL.
     let currentPrintFile = "";
+    let printerState = "unknown";
+    let currentNozzleTemp = 0;
+    let requestedNozzleTarget = null;
+    let requestedBedTarget = null;
+    let lastPrinterHeartbeat = 0;
+    let lastTelemetry = 0;
+    let printerHeartbeatPending = false;
+    let printerHeartbeatTimer = null;
+    let printerHeartbeatTimeout = null;
+    const PRINTER_HEARTBEAT_INTERVAL_MS = 10000;
+    const PRINTER_HEARTBEAT_STALE_MS = 15000;
+    const PRINTER_HEARTBEAT_REPLY_TIMEOUT_MS = 5000;
+
+    function printIsActive() {
+        return /print|paus|resume/i.test(printerState) || currentPrintFile !== "";
+    }
+
+    function updatePrinterState() {
+        let state;
+        if (printIsActive()) {
+            state = printerState;
+        } else if (
+            Date.now() - lastPrinterHeartbeat < PRINTER_HEARTBEAT_STALE_MS
+            || Date.now() - lastTelemetry < PRINTER_HEARTBEAT_STALE_MS
+        ) {
+            state = "Ready";
+        } else if (printerHeartbeatPending) {
+            state = "Checking…";
+        } else {
+            state = "Offline";
+        }
+        setText(["#control-printer-state"], state);
+    }
+
+    function sendPrinterHeartbeat() {
+        if (!ctrlReady()) {
+            updatePrinterState();
+            return;
+        }
+        printerHeartbeatPending = true;
+        window.clearTimeout(printerHeartbeatTimeout);
+        sendMqtt({
+            commandType: MqttMsgType.ZZ_MQTT_CMD_GCODE_COMMAND,
+            cmdData: "M105",
+            cmdLen: 4,
+        }, true, "printer-heartbeat");
+        printerHeartbeatTimeout = window.setTimeout(function () {
+            printerHeartbeatPending = false;
+            updatePrinterState();
+        }, PRINTER_HEARTBEAT_REPLY_TIMEOUT_MS);
+    }
+
+    function startPrinterHeartbeat() {
+        window.clearInterval(printerHeartbeatTimer);
+        sendPrinterHeartbeat();
+        printerHeartbeatTimer = window.setInterval(function () {
+            sendPrinterHeartbeat();
+            updatePrinterState();
+        }, PRINTER_HEARTBEAT_INTERVAL_MS);
+    }
+
+    function stopPrinterHeartbeat() {
+        window.clearInterval(printerHeartbeatTimer);
+        printerHeartbeatTimer = null;
+        window.clearTimeout(printerHeartbeatTimeout);
+        printerHeartbeatTimeout = null;
+        lastPrinterHeartbeat = 0;
+        printerHeartbeatPending = false;
+        updatePrinterState();
+    }
+
+    function updateAttendedControls() {
+        const controlReady = sockets.ctrl && sockets.ctrl.is_open;
+        const printActive = printIsActive();
+        $("#print-pause, #print-resume, #print-stop").prop("disabled", !controlReady || !printActive);
+        const canAdjustZ = controlReady && !printActive;
+        const canMoveFilament = canAdjustZ && currentNozzleTemp >= 17000;
+        $("#z-offset-down, #z-offset-up").prop("disabled", !canAdjustZ);
+        $("#filament-retract, #filament-extrude").prop("disabled", !canMoveFilament);
+    }
 
     // Telemetry socket: consumes the normalized printer-state schema from
     // /ws/state (nozzle/bed/print/speed/state) instead of raw MQTT commandType
@@ -358,7 +438,6 @@ $(function () {
     sockets.mqtt = new AutoWebSocket({
         name: "state socket",
         url: `${location.protocol.replace('http','ws')}//${location.host}/ws/state`,
-        badge: "#badge-mqtt",
 
         opened: function (event) {
             setDisabled(["#set-nozzle-temp", "#set-bed-temp"], false);
@@ -366,9 +445,13 @@ $(function () {
 
         message: function (ev) {
             const data = JSON.parse(ev.data);
+            lastTelemetry = Date.now();
+            updatePrinterState();
 
             if ("state" in data) {
-                setText(["#control-printer-state"], data.state);
+                printerState = data.state;
+                updatePrinterState();
+                updateAttendedControls();
             }
 
             if (data.print) {
@@ -376,6 +459,7 @@ $(function () {
                 if ("name" in p) {
                     currentPrintFile = p.name || "";
                     $("#print-name").text(p.name);
+                    updateAttendedControls();
                 }
                 if ("elapsed" in p) {
                     $("#time-elapsed").text(getTime(p.elapsed));
@@ -408,13 +492,19 @@ $(function () {
 
             if (data.nozzle) {
                 if ("current" in data.nozzle) {
+                    currentNozzleTemp = data.nozzle.current;
                     setText(["#nozzle-temp", "#control-nozzle-current"], `${getTemp(data.nozzle.current)}°C`);
+                    updateAttendedControls();
                 }
                 if ("target" in data.nozzle) {
                     const target = getTemp(data.nozzle.target);
                     if (!isNaN(target)) {
-                        setText(["#set-nozzle-temp", "#control-nozzle-target"], `${target}°C`);
-                        $("#control-nozzle-input").val(target);
+                        if (requestedNozzleTarget === target) {
+                            requestedNozzleTarget = null;
+                        }
+                        const shownTarget = requestedNozzleTarget ?? target;
+                        setText(["#set-nozzle-temp", "#control-nozzle-target"], `${shownTarget}°C`);
+                        $("#control-nozzle-input").val(shownTarget);
                     }
                 }
             }
@@ -426,8 +516,12 @@ $(function () {
                 if ("target" in data.bed) {
                     const target = getTemp(data.bed.target);
                     if (!isNaN(target)) {
-                        setText(["#set-bed-temp", "#control-bed-target"], `${target}°C`);
-                        $("#control-bed-input").val(target);
+                        if (requestedBedTarget === target) {
+                            requestedBedTarget = null;
+                        }
+                        const shownTarget = requestedBedTarget ?? target;
+                        setText(["#set-bed-temp", "#control-bed-target"], `${shownTarget}°C`);
+                        $("#control-bed-input").val(shownTarget);
                     }
                 }
             }
@@ -450,8 +544,15 @@ $(function () {
             setText(["#set-bed-temp", "#control-bed-target"], "0°C");
             setText(["#print-speed", "#control-print-speed"], "0mm/s");
             setText(["#print-layer", "#control-layer"], "0 / 0");
-            setText(["#control-printer-state"], "Disconnected");
+            printerState = "disconnected";
+            currentNozzleTemp = 0;
+            currentPrintFile = "";
+            requestedNozzleTarget = null;
+            requestedBedTarget = null;
+            lastTelemetry = 0;
+            updatePrinterState();
             setDisabled(["#set-nozzle-temp", "#set-bed-temp"], true);
+            updateAttendedControls();
         },
     });
 
@@ -500,14 +601,27 @@ $(function () {
     sockets.ctrl = new AutoWebSocket({
         name: "Control socket",
         url: `${location.protocol.replace('http','ws')}//${location.host}/ws/ctrl`,
-        badge: "#badge-ctrl",
 
         opened: function () {
             $(".control-command").prop("disabled", false);
+            updateAttendedControls();
+            startPrinterHeartbeat();
         },
 
         message: function (event) {
             const data = JSON.parse(event.data);
+            if (data.requestId === "printer-heartbeat") {
+                window.clearTimeout(printerHeartbeatTimeout);
+                printerHeartbeatTimeout = null;
+                printerHeartbeatPending = false;
+                if (data.mqttReply) {
+                    lastPrinterHeartbeat = Date.now();
+                } else {
+                    lastPrinterHeartbeat = 0;
+                }
+                updatePrinterState();
+                return;
+            }
             if (Object.prototype.hasOwnProperty.call(data, "mqttReply")) {
                 if (data.mqttReply && Object.prototype.hasOwnProperty.call(data.mqttReply, "resData")) {
                     appendGcodeLog(`< ${data.mqttReply.resData}`);
@@ -521,25 +635,22 @@ $(function () {
 
         close: function () {
             $(".control-command").prop("disabled", true);
+            updateAttendedControls();
+            stopPrinterHeartbeat();
         },
     });
 
     sockets.pppp_state = new AutoWebSocket({
         name: "PPPP socket",
         url: `${location.protocol.replace('http','ws')}//${location.host}/ws/pppp-state`,
-        badge: "#badge-pppp",
     });
 
     /* Only connect websockets if #player element exists in DOM (i.e., if we
      * have a configuration). Otherwise we are constantly trying to make
      * connections that will never succeed. */
-    if ($("#badge-mqtt").length) {
+    if ($("#control-printer-state").length) {
         sockets.mqtt.connect();
-    }
-    if ($("#badge-ctrl").length) {
         sockets.ctrl.connect();
-    }
-    if ($("#badge-pppp").length) {
         sockets.pppp_state.connect();
     }
     if ($("#player").length) {
@@ -584,18 +695,59 @@ $(function () {
     var popupModalInputDom = document.getElementById("popupModalInput");
     var popupModalInputBS = new bootstrap.Modal(popupModalInputDom);
 
+    $(".control-temperature-picker").on("click", function () {
+        const trigger = document.querySelector($(this).attr("data-picker-trigger"));
+        popupModalInputBS.show(trigger);
+        return false;
+    });
+
     popupModalInputDom.addEventListener("shown.bs.modal", function (e) {
         const trigger = e.relatedTarget;
         const input_id = $(trigger).attr("id");
         const modalInput = $("#modal-input-elem");
+        const isTemperatureTarget = $(trigger).attr("data-clear-on-open") === "true";
         setClearModalInput(trigger, $(trigger).attr("title"))
+
+        if (isTemperatureTarget) {
+            const picker = $("#temperature-picker");
+            const range = $("#temperature-picker-range");
+            const max = $(trigger).attr("data-input-max");
+            range.attr("max", max).attr("step", $(trigger).attr("data-picker-step") || "5").val(0);
+            range.get(0).oninput = function () {
+                $("#temperature-picker-value").text(`${this.value}°C`);
+            };
+            $("#temperature-picker-value").text("0°C");
+            picker.attr("data-temperature-target", input_id);
+            picker.removeClass("d-none");
+            $("#popupModalInputCustom").removeClass("d-none");
+            $("#popupModalInputOK").text("Set slider");
+        } else {
+            $("#temperature-picker").addClass("d-none").removeAttr("data-temperature-target");
+            $("#popupModalInputCustom").addClass("d-none");
+            $("#popupModalInputOK").text("OK");
+        }
+        document.getElementById("popupModalInputCustom").onclick = function () {
+            const customValue = String(modalInput.val() || "").trim();
+            if (customValue === "") {
+                flash_message("Enter a custom temperature first", "warning");
+                return false;
+            }
+            sendNewValueViaMQTT(input_id, customValue);
+            setClearModalInput(trigger, "", false);
+            $("#popupModalInput form").off("submit");
+            popupModalInputBS.hide();
+            return false;
+        };
 
         $("#popupModalInput form").on("submit", function (event) {
             // do not perform the default submit action
             event.preventDefault();
 
             // send the new value to the printer
-            sendNewValueViaMQTT(input_id, modalInput.val());
+            const value = isTemperatureTarget
+                ? document.getElementById("temperature-picker-range").value
+                : String(modalInput.val() || "").trim();
+            sendNewValueViaMQTT(input_id, value);
 
             // clear modal
             setClearModalInput(trigger, "", false);
@@ -609,9 +761,17 @@ $(function () {
             return false;
         });
 
-        // set input focus
-        modalInput.get(0).focus();
-        modalInput.get(0).select();
+        if (isTemperatureTarget) {
+            modalInput.attr("placeholder", "Enter temperature");
+        } else {
+            modalInput.removeAttr("placeholder");
+            modalInput.get(0).select();
+        }
+        // Keep the keyboard closed for temperature pickers. The slider is the
+        // default path; tapping the empty custom field explicitly selects it.
+        if (!isTemperatureTarget) {
+            modalInput.get(0).focus();
+        }
     });
 
     // from https://stackoverflow.com/a/3561711/15468061
@@ -653,7 +813,9 @@ $(function () {
             // special handling of title and value
             $("#modal-input-inner").text(title);
             const unit_regex = new RegExp(escapeRegex(unit) + "$");
-            const input_value = $(trigger).text().trim().replace(unit_regex, "").trim();
+            const input_value = $(trigger).attr("data-clear-on-open") === "true"
+                ? ""
+                : $(trigger).text().trim().replace(unit_regex, "").trim();
             modalInput.val(input_value);
         } else {
             $("#modal-input-inner").text("");
@@ -662,37 +824,38 @@ $(function () {
     }
 
     function sendNewValueViaMQTT(input_id, new_value) {
-        let message_data = {};
-        const new_value_int = (new_value === "") ? 0 : parseInt(new_value);
-        switch (input_id) {
-            case "set-nozzle-temp":
-                message_data = {
-                    commandType: MqttMsgType.ZZ_MQTT_CMD_PREHEAT_CONFIG,
-                    nozzle: new_value_int * 100,
-                    value: 1,     // not sure why and if this is needed
-                };
-                break;
-            case "set-bed-temp":
-                message_data = {
-                    commandType: MqttMsgType.ZZ_MQTT_CMD_PREHEAT_CONFIG,
-                    heatbed: new_value_int * 100,
-                    value: 1,     // not sure why and if this is needed
-                };
-                break;
+        const target = Number.parseInt(new_value, 10);
+        const temperatures = {
+            "set-nozzle-temp": { kind: "nozzle", command: "M104", limit: 300, target: "#set-nozzle-temp" },
+            "control-nozzle-input": { kind: "nozzle", command: "M104", limit: 300, target: "#set-nozzle-temp" },
+            "set-bed-temp": { kind: "bed", command: "M140", limit: 100, target: "#set-bed-temp" },
+            "control-bed-input": { kind: "bed", command: "M140", limit: 100, target: "#set-bed-temp" },
+        };
+        const setting = temperatures[input_id];
+        if (!setting || !Number.isInteger(target) || target < 0 || target > setting.limit) {
+            flash_message("Enter a temperature within the allowed range", "warning");
+            return;
         }
-        if (message_data) {
-            sockets.ctrl.ws.send(JSON.stringify({ mqtt: message_data }));
+        // PREHEAT_CONFIG stores a profile; it does not change the active
+        // heater target. M104/M140 are the firmware commands that do.
+        if (setting.kind === "nozzle") {
+            requestedNozzleTarget = target;
+            $("#control-nozzle-input").val(target);
+        } else {
+            requestedBedTarget = target;
+            $("#control-bed-input").val(target);
         }
+        sendGcode(`${setting.command} S${target}`);
+        setText([setting.target], `${target}°C`);
     }
 
     /**
      * Control tab
      *
      * Sends printer commands over the /ws/ctrl websocket as raw GCode
-     * (GCODE_COMMAND). Pause/resume/stop use Anker's out-of-band commands
-     * M2022/M2023/M2024, handled directly by the serial parser in the M5C
-     * Marlin firmware (queue.cpp ak_gcode_parse, eufymake/eufyMake-Marlin-M5C)
-     * so they take effect even while the print buffer is full.
+     * (GCODE_COMMAND). Pause/resume use PRINT_CONTROL with the active job
+     * identity. Stop combines PRINT_CONTROL cancellation with M2024 so both
+     * the communication-module job and MCU-buffered motion are stopped.
      */
     function ctrlReady() {
         return sockets.ctrl && sockets.ctrl.ws && sockets.ctrl.is_open;
@@ -707,15 +870,19 @@ $(function () {
         logElem.get(0).scrollTop = logElem.get(0).scrollHeight;
     }
 
-    function sendMqtt(message_data, awaitResponse = false) {
+    function sendMqtt(message_data, awaitResponse = false, requestId = null) {
         if (!ctrlReady()) {
             flash_message("Control socket not connected", "warning");
             return;
         }
-        sockets.ctrl.ws.send(JSON.stringify({
+        const message = {
             mqtt: message_data,
             awaitResponse: awaitResponse,
-        }));
+        };
+        if (requestId !== null) {
+            message.requestId = requestId;
+        }
+        sockets.ctrl.ws.send(JSON.stringify(message));
     }
 
     // PRINT_CONTROL (0x3f0) identifies the running job by name, so it needs
@@ -738,6 +905,11 @@ $(function () {
         }, awaitResponse);
         appendGcodeLog(`> ${line}`);
     }
+
+    $("#control-refresh").on("click", function () {
+        window.location.reload();
+        return false;
+    });
 
     // Pause / Resume use PRINT_CONTROL (job-aware) rather than M2022/M2023;
     // the M-code path does not act on an onboard job whose stream the
@@ -789,21 +961,44 @@ $(function () {
         return false;
     });
 
-    $("#control-nozzle-form").on("submit", function (event) {
-        event.preventDefault();
-        const target = parseInt($("#control-nozzle-input").val());
-        if (!isNaN(target)) {
-            sendGcode(`M104 S${target}`);
+    function confirmAttendedAction(message) {
+        if (printIsActive()) {
+            flash_message("This control is unavailable while a print is active", "warning");
+            return false;
         }
+        if (!window.confirm(message)) {
+            return false;
+        }
+        return true;
+    }
+
+    $("#filament-extrude, #filament-retract").on("click", function () {
+        const amount = parseFloat($("#filament-amount").val());
+        const direction = this.id === "filament-extrude" ? 1 : -1;
+        const action = direction > 0 ? "extrude" : "retract";
+        if (currentNozzleTemp < 17000) {
+            flash_message("Heat the nozzle to at least 170°C before moving filament", "warning");
+            return false;
+        }
+        if (!confirmAttendedAction(`${action[0].toUpperCase()}${action.slice(1)} ${amount} mm of filament? Stay at the printer.`)) {
+            return false;
+        }
+        // The printer treats a semicolon as the beginning of a comment, so
+        // these must be separate messages rather than one combined string.
+        sendGcode("M83");
+        sendGcode(`G1 E${direction * amount} F300`);
+        sendGcode("M82");
         return false;
     });
 
-    $("#control-bed-form").on("submit", function (event) {
-        event.preventDefault();
-        const target = parseInt($("#control-bed-input").val());
-        if (!isNaN(target)) {
-            sendGcode(`M140 S${target}`);
+    $("#z-offset-down, #z-offset-up").on("click", function () {
+        const step = parseFloat($("#z-offset-step").val());
+        const direction = this.id === "z-offset-up" ? 1 : -1;
+        const amount = direction * step;
+        if (!confirmAttendedAction(`Apply a live Z adjustment of ${amount.toFixed(2)} mm? Stay at the printer.`)) {
+            return false;
         }
+        sendGcode(`M290 Z${amount.toFixed(2)}`);
         return false;
     });
 

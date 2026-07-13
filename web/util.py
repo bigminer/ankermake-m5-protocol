@@ -1,8 +1,7 @@
-import io
 import logging as log
 import re
 import time
-from threading import Lock, Thread
+from threading import Lock
 
 from flask import flash, redirect, request
 
@@ -69,6 +68,13 @@ def extract_preprint_temperatures(data: bytes) -> tuple[int, int]:
         temperatures[command] = value
 
     return temperatures["M190"], temperatures["M109"]
+
+
+def extract_preprint_temperatures_from_file(file) -> tuple[int, int]:
+    """Inspect the G-code preamble and leave the upload ready to transfer."""
+    data = file.read(256 * 1024)
+    file.seek(0)
+    return extract_preprint_temperatures(data)
 
 
 def _send_gcode(client, command: str, timeout: int) -> dict:
@@ -144,7 +150,7 @@ def _disconnect_mqtt(client):
         log.exception("Pre-print hook: failed to disconnect MQTT client")
 
 
-def _run_preprint_upload(app, data, filename, user_name, bed_temp, nozzle_temp):
+def _run_preprint_upload(app, upload, user_name, bed_temp, nozzle_temp):
     client = None
     try:
         client = cli.mqtt.mqtt_open(
@@ -173,19 +179,17 @@ def _run_preprint_upload(app, data, filename, user_name, bed_temp, nozzle_temp):
         )
         _send_gcode(client, "G36", timeout=timeout)
 
-        upload = io.BytesIO(data)
-        upload.filename = filename
         with app.svc.borrow("filetransfer") as filetransfer:
             filetransfer.send_file(upload, user_name)
-        log.info("Pre-print hook: completed routine and uploaded %r", filename)
+        log.info("Pre-print hook: completed routine and uploaded %r", upload.filename)
     except Exception:
-        log.exception("Pre-print hook: failed for %r", filename)
+        log.exception("Pre-print hook: failed for %r", upload.filename)
         if client is not None:
             _cool_down(client)
+        raise
     finally:
         if client is not None:
             _disconnect_mqtt(client)
-        _PREPRINT_LOCK.release()
 
 
 def upload_file_to_printer(app, file):
@@ -198,30 +202,14 @@ def upload_file_to_printer(app, file):
     user_name = request.headers.get("User-Agent", "ankerctl").split("/")[0]
 
     if app.config.get("preprint_g36"):
-        data = file.read()
-        bed_temp, nozzle_temp = extract_preprint_temperatures(data)
+        bed_temp, nozzle_temp = extract_preprint_temperatures_from_file(file)
         if not _PREPRINT_LOCK.acquire(blocking=False):
             raise ConnectionError("A pre-print routine is already running")
 
-        worker = Thread(
-            target=_run_preprint_upload,
-            args=(
-                app,
-                data,
-                file.filename,
-                user_name,
-                bed_temp,
-                nozzle_temp,
-            ),
-            name="ankerctl-preprint",
-            daemon=True,
-        )
         try:
-            worker.start()
-        except Exception:
+            _run_preprint_upload(app, file, user_name, bed_temp, nozzle_temp)
+        finally:
             _PREPRINT_LOCK.release()
-            raise
-        log.info("Pre-print hook: queued %r", file.filename)
         return
 
     with app.svc.borrow("filetransfer") as ft:

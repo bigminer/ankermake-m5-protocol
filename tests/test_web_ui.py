@@ -88,6 +88,8 @@ class WebUiTestCase(unittest.TestCase):
         self.client = app.test_client()
         self.old_testing = app.config.get("TESTING")
         self.old_access_token = app.config.get("access_token")
+        self.old_slicer_token = app.config.get("slicer_token")
+        self.old_max_content_length = app.config.get("MAX_CONTENT_LENGTH")
         self.old_config = app.config.get("config")
         self.old_login = app.config.get("login")
         self.old_video_supported = app.config.get("video_supported")
@@ -103,10 +105,13 @@ class WebUiTestCase(unittest.TestCase):
         app.config["printer_index"] = 0
         app.config["webcam_url"] = ""
         app.config["preprint_g36"] = False
+        app.config["slicer_token"] = ""
 
     def tearDown(self):
         app.config["TESTING"] = self.old_testing
         app.config["access_token"] = self.old_access_token
+        app.config["slicer_token"] = self.old_slicer_token
+        app.config["MAX_CONTENT_LENGTH"] = self.old_max_content_length
         app.config["config"] = self.old_config
         app.config["login"] = self.old_login
         app.config["video_supported"] = self.old_video_supported
@@ -221,6 +226,39 @@ class WebUiTestCase(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json, {})
         upload_file.assert_called_once()
+
+    def test_api_files_local_requires_key_when_remote(self):
+        app.config["slicer_token"] = "slicer-secret"
+
+        with mock.patch("web.util.upload_file_to_printer") as upload_file:
+            denied = self.client.post(
+                "/api/files/local",
+                data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "test.gcode")},
+                content_type="multipart/form-data",
+                environ_overrides={"REMOTE_ADDR": "192.0.2.10"},
+            )
+            allowed = self.client.post(
+                "/api/files/local",
+                data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "test.gcode")},
+                content_type="multipart/form-data",
+                headers={"X-Api-Key": "slicer-secret"},
+                environ_overrides={"REMOTE_ADDR": "192.0.2.10"},
+            )
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 200)
+        upload_file.assert_called_once()
+
+    def test_api_files_local_rejects_oversize_request(self):
+        app.config["MAX_CONTENT_LENGTH"] = 8
+
+        resp = self.client.post(
+            "/api/files/local",
+            data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "test.gcode")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(resp.status_code, 413)
 
     def test_status_reports_service_shape(self):
         app.svc = FakeServiceSet({

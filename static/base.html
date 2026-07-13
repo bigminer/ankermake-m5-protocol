@@ -1,4 +1,4 @@
-{% import "macro.html" as macro -%}
+{% import "macro.html" as macro with context -%}
 <!DOCTYPE html>
 <html data-bs-theme="dark" lang="en">
     <head>
@@ -69,10 +69,20 @@
                             <div class="input-group-text mx-auto" id="popupModalInputUnit">
                             </div>
                         </div>
+                        <div class="d-none mt-3" id="temperature-picker">
+                            <label class="form-label small mb-1" for="temperature-picker-range">
+                                Slider target: <span id="temperature-picker-value">0°C</span>
+                            </label>
+                            <input class="form-range" id="temperature-picker-range" type="range" min="0" max="100" step="5" value="0">
+                            <p class="small text-body-secondary mb-0">
+                                Or enter an exact temperature above.
+                            </p>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary" id="popupModalInputOK">OK</button>
+                        <button type="button" class="btn btn-outline-primary d-none" id="popupModalInputCustom">Set custom</button>
+                        <button type="submit" class="btn btn-primary" id="popupModalInputOK" data-temperature-mode="slider">OK</button>
                     </div>
                     </form>
                 </div>

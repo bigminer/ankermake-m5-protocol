@@ -12,11 +12,11 @@ The paths and network names below describe the installation as of
 
 - Never place account tokens, MQTT credentials, the web access token, Flask
   secret key, or TLS private keys in source control or documentation.
-- The web UI is protected by `ANKERCTL_TOKEN`, but the OctoPrint-compatible
-  slicer endpoints remain unauthenticated so OrcaSlicer can upload jobs.
-- `ankerctl` listens on `0.0.0.0:4470`. Any device that can reach that port
-  can call the exempt upload endpoint and start a print. Restrict access with
-  the macOS firewall, network segmentation, or Tailscale ACLs.
+- The web UI is protected by `ANKERCTL_TOKEN`. Slicers on the same computer
+  can upload without a key; remote slicers must use `ANKERCTL_SLICER_TOKEN`
+  as their OctoPrint API key.
+- `ankerctl` listens on `0.0.0.0:4470`. Configure a slicer API key and keep
+  firewall, network-segmentation, or Tailscale ACL protections in place.
 - MediaMTX listens on all interfaces. Treat its publisher URL as a control
   endpoint: anyone who can reach it can replace the `ipadcam` stream.
 - Do not enable the experimental `G36` pre-print hook. See
@@ -153,7 +153,9 @@ Environment variables:
 | Variable | Purpose | Current policy |
 | --- | --- | --- |
 | `ANKERCTL_TOKEN` | Shared web UI login token | Required; value kept only in the plist |
+| `ANKERCTL_SLICER_TOKEN` | Remote slicer upload API key | Required when Orca runs off-host; value kept only in the plist |
 | `ANKERCTL_SECRET_KEY` | Stable Flask session signing key | Required; random secret kept only in the plist |
+| `ANKERCTL_MAX_UPLOAD_BYTES` | Largest accepted slicer upload | Defaults to 512 MiB; lower it if your profiles allow |
 | `ANKERCTL_PREPRINT_G36` | Experimental pre-upload preparation hook | Must remain `false` |
 | `ANKERCTL_PREPRINT_COMMAND_TIMEOUT` | Experimental hook timeout | Present but unused while hook is disabled |
 | `ANKERCTL_WEBCAM_URL` | Optional environment-level webcam URL | Not required when URL is saved in `default.json` |
@@ -246,20 +248,24 @@ Authentication behavior:
 
 - `/login` accepts `ANKERCTL_TOKEN` and creates a Flask session.
 - `ANKERCTL_SECRET_KEY` keeps sessions valid across restarts.
-- `/api/version`, `/api/files/local`, `/login`, and static assets are exempt.
+- `/api/version`, `/login`, and static assets are exempt. `/api/files/local`
+  permits unauthenticated loopback uploads only; non-loopback requests must
+  send `ANKERCTL_SLICER_TOKEN` as `X-Api-Key`.
 - WebSocket handshakes reject unauthenticated clients with HTTP 401.
 
-The upload exemption is required by the current Orca integration, but it is
-also the main network security risk.
+The connection test only needs the exempt version endpoint. A remote upload
+requires the configured slicer API key.
 
 ### Control tab warning
 
 Raw G-code, fan, jog, home and temperature controls use the known
 `GCODE_COMMAND` MQTT primitive.
 
-The pause, resume and stop button values are best guesses and have not been
-validated against this M5C firmware. Do not rely on those buttons for safety.
-Use the printer/app controls or physical power switch when necessary.
+Pause and resume use the job-aware `PRINT_CONTROL` command with the active
+file path. Stop sends both `PRINT_CONTROL` cancellation and `M2024`, because
+the former cancels the communication-module job while the latter clears
+motion already buffered by the MCU. These paths were validated on the M5C,
+but the physical power switch remains the safety backstop.
 
 ## OrcaSlicer configuration
 
@@ -267,7 +273,8 @@ Configure the printer connection as an OctoPrint-compatible host:
 
 ```text
 Host: http://127.0.0.1:4470
-API key: not required
+API key: leave empty only when Orca runs on the Mac; otherwise use
+`ANKERCTL_SLICER_TOKEN`
 Operation: Send and Print
 ```
 
@@ -578,8 +585,8 @@ Then update/re-import configuration if the cached address is stale.
 ### Web UI redirects to login
 
 This is expected when `ANKERCTL_TOKEN` is set. Use the configured access
-token. Do not remove authentication merely to fix slicer uploads; the slicer
-endpoints are already exempt.
+token. Do not remove authentication merely to fix slicer uploads; configure
+`ANKERCTL_SLICER_TOKEN` as the slicer's API key for remote uploads.
 
 ### Orca cannot test the host
 

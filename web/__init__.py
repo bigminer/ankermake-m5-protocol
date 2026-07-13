@@ -27,6 +27,7 @@ Services:
     - config: Handles configuration manipulation for ankerctl
 """
 import hmac
+import ipaddress
 import os
 import json
 import time
@@ -62,8 +63,20 @@ app.config.from_prefixed_env()
 
 # Optional shared-secret access token. When set, the human web UI requires
 # login; when empty, auth is disabled (preserving previous behaviour). The
-# slicer/OctoPrint upload endpoints are always exempt (see _require_token).
+# slicer upload endpoint has its own remote-access check (see
+# _require_slicer_token).
 app.config["access_token"] = os.environ.get("ANKERCTL_TOKEN", "")
+
+# A distinct key for the OctoPrint-compatible upload API.  Local slicers can
+# continue to use loopback without a key; remote upload requests must present
+# this key in X-Api-Key.
+app.config["slicer_token"] = os.environ.get("ANKERCTL_SLICER_TOKEN", "")
+app.config["MAX_CONTENT_LENGTH"] = int(
+    os.environ.get("ANKERCTL_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024))
+)
+# A process-start version keeps mobile browsers from reusing stale UI assets
+# after the local web service is restarted.
+app.config["static_version"] = str(time.time_ns())
 
 # Optional external webcam stream URL (e.g. MJPEG from a phone/USB cam),
 # embedded on the Control tab. Empty = hidden.
@@ -82,6 +95,11 @@ app.config["preprint_command_timeout"] = int(
 app.svc = ServiceManager()
 
 sock = Sock(app)
+
+
+@app.context_processor
+def static_asset_version():
+    return {"static_version": app.config["static_version"]}
 
 
 # Paths always reachable without a login token: the OctoPrint upload API used
@@ -116,11 +134,29 @@ def _auth_safe_redirect_target(target):
     return target
 
 
+def _request_is_loopback():
+    try:
+        return ipaddress.ip_address(request.remote_addr).is_loopback
+    except (TypeError, ValueError):
+        return False
+
+
+def _require_slicer_token():
+    """Protect remote print-start uploads while retaining local compatibility."""
+    if _request_is_loopback():
+        return
+
+    required = app.config.get("slicer_token")
+    supplied = request.headers.get("X-Api-Key", "")
+    if not required or not hmac.compare_digest(supplied, required):
+        return "Slicer API key required for non-loopback uploads", 403
+
+
 @app.before_request
 def _require_token():
     """
-    Gate the web UI behind a shared token when ANKERCTL_TOKEN is set. Slicer
-    upload endpoints stay open so 'Send and Print' keeps working without auth.
+    Gate the web UI behind a shared token when ANKERCTL_TOKEN is set. The
+    slicer endpoint has separate loopback/API-key access control.
     """
     required = app.config.get("access_token")
     if not required:
@@ -209,10 +245,15 @@ def ctrl_send_mqtt(sock, msg):
                     reply = obj
                     break
 
-        sock.send(json.dumps({
+        response = {
             "commandType": command_type,
             "mqttReply": reply,
-        }))
+        }
+        # Preserve a browser-side correlation ID when supplied.  This lets
+        # benign status probes be distinguished from terminal commands.
+        if "requestId" in msg:
+            response["requestId"] = msg["requestId"]
+        sock.send(json.dumps(response))
 
 
 @sock.route("/ws/mqtt")
@@ -387,6 +428,7 @@ def app_root():
             country_codes=json.dumps(cli.countrycodes.country_codes),
             current_country=country,
             webcam_url=webcam_url,
+            slicer_token_configured=bool(app.config["slicer_token"]),
             printer=printer
         )
 
@@ -598,6 +640,10 @@ def app_api_files_local():
     Returns:
         A dictionary containing file details
     """
+    auth_error = _require_slicer_token()
+    if auth_error:
+        return auth_error
+
     no_act = not cli.util.parse_http_bool(request.form["print"])
 
     if no_act:

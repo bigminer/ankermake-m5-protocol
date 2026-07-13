@@ -14,7 +14,13 @@
                             <kbd id="octoPrintHost" class="fs-6">{{ request_host }}:{{ request_port }}</kbd>
                             {{ macro.clipboard_button("#octoPrintHost") }}
                         </div>
-                        <p class="small text-body-secondary mb-0">Leave the API key blank — no key is required.</p>
+                        <p class="small text-body-secondary mb-0">
+                            {% if slicer_token_configured %}
+                            Enter the configured slicer API key.
+                            {% else %}
+                            Leave the API key blank only when the slicer runs on this computer.
+                            {% endif %}
+                        </p>
                     </div>
                 </div>
 
@@ -28,7 +34,13 @@
                                 <code>OctoPrint</code></li>
                             <li class="list-group-item">Set <strong>Hostname, IP or URL</strong> to
                                 <kbd>{{ request_host }}:{{ request_port }}</kbd></li>
-                            <li class="list-group-item">Leave <strong>API Key</strong> empty</li>
+                            <li class="list-group-item">
+                                {% if slicer_token_configured %}
+                                Enter the configured <strong>API Key</strong>
+                                {% else %}
+                                Leave <strong>API Key</strong> empty only for a local slicer
+                                {% endif %}
+                            </li>
                             <li class="list-group-item">Click <strong>Test</strong> to confirm the
                                 connection, then <strong>OK</strong></li>
                             <li class="list-group-item">Slice your plate, then click
@@ -48,7 +60,7 @@
                                 gear icon {{ macro.bi_icon("gear-fill") }} to add a physical printer</li>
                             <li class="list-group-item">Set <strong>Host Type</strong> to
                                 <code>OctoPrint</code>, <strong>Hostname</strong> to
-                                <kbd>{{ request_host }}:{{ request_port }}</kbd>, API key blank</li>
+                                <kbd>{{ request_host }}:{{ request_port }}</kbd>{% if slicer_token_configured %}, then enter the configured API key{% else %}; leave the API key blank only for a local slicer{% endif %}</li>
                             <li class="list-group-item">Slice, then use the
                                 <strong>Send and Print</strong> action
                                 ({{ macro.bi_icon("caret-right-fill") }} next to Export)</li>

@@ -10,10 +10,6 @@ from .. import app
 from libflagship.pppp import P2PCmdType, Aabb, FileTransfer
 from libflagship.ppppapi import FileUploadInfo, PPPPError
 
-import cli.mqtt
-import cli.util
-
-
 FILE_TRANSFER_ACK_TIMEOUT = 15
 
 
@@ -38,8 +34,9 @@ class FileTransferService(Service):
         except AttributeError:
             raise ConnectionError("No pppp connection to printer")
 
-        data = fd.read()
-        fui = FileUploadInfo.from_data(data, fd.filename, user_name=user_name, user_id="-", machine_id="-")
+        fui = FileUploadInfo.from_stream(
+            fd, fd.filename, user_name=user_name, user_id="-", machine_id="-"
+        )
         log.info(f"Going to upload {fui.size} bytes as {fui.name!r}")
         try:
             log.info("Requesting file transfer..")
@@ -51,8 +48,10 @@ class FileTransferService(Service):
 
             log.info("Sending file contents..")
             blocksize = 1024 * 32
-            for pos, chunk in cli.util.split_chunks(data, blocksize):
+            pos = 0
+            while chunk := fd.read(blocksize):
                 self.api_aabb_request(api, FileTransfer.DATA, chunk, pos)
+                pos += len(chunk)
 
             log.info("File upload complete. Requesting print start of job.")
 

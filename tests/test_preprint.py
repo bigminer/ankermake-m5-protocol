@@ -1,4 +1,5 @@
 import contextlib
+import io
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,6 +51,12 @@ class FakeServiceManager:
 
 
 class PreprintTests(unittest.TestCase):
+    @staticmethod
+    def upload(data, filename="test.gcode"):
+        upload = io.BytesIO(data)
+        upload.filename = filename
+        return upload
+
     def test_extracts_resolved_temperatures(self):
         data = b"M104 S150\nM190 S55\nM109 S220\nG28\n"
         self.assertEqual(util.extract_preprint_temperatures(data), (55, 220))
@@ -103,12 +110,10 @@ class PreprintTests(unittest.TestCase):
         )
         data = b"M190 S55\nM109 S220\nG28\n"
 
-        util._PREPRINT_LOCK.acquire()
         with patch("web.util.cli.mqtt.mqtt_open", return_value=client):
             util._run_preprint_upload(
                 app,
-                data,
-                "test.gcode",
+                self.upload(data),
                 "OrcaSlicer",
                 55,
                 220,
@@ -130,7 +135,6 @@ class PreprintTests(unittest.TestCase):
         self.assertEqual(filetransfer.data, data)
         self.assertEqual(filetransfer.filename, "test.gcode")
         self.assertEqual(filetransfer.user_name, "OrcaSlicer")
-        self.assertFalse(util._PREPRINT_LOCK.locked())
 
     def test_failure_cools_down_and_does_not_upload(self):
         client = FakeClient(
@@ -156,16 +160,15 @@ class PreprintTests(unittest.TestCase):
             svc=FakeServiceManager(filetransfer),
         )
 
-        util._PREPRINT_LOCK.acquire()
         with patch("web.util.cli.mqtt.mqtt_open", return_value=client):
-            util._run_preprint_upload(
-                app,
-                b"data",
-                "test.gcode",
-                "OrcaSlicer",
-                55,
-                220,
-            )
+            with self.assertRaisesRegex(RuntimeError, "heating failed"):
+                util._run_preprint_upload(
+                    app,
+                    self.upload(b"data"),
+                    "OrcaSlicer",
+                    55,
+                    220,
+                )
 
         self.assertEqual(
             client.commands,
@@ -181,7 +184,6 @@ class PreprintTests(unittest.TestCase):
             ],
         )
         self.assertIsNone(filetransfer.data)
-        self.assertFalse(util._PREPRINT_LOCK.locked())
 
 
 if __name__ == "__main__":

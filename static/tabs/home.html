@@ -46,26 +46,6 @@
                 {% endif %}
             </div>
             <div class="col-md-12 col-lg-6 col-xl-4">
-                {% if printer %}
-                <div class="card mb-3">
-                    <div class="card-header">Connection</div>
-                    <div class="card-body">
-                        <div class="fw-semibold mb-2">
-                            {{ printer.name }}
-                            <span class="text-body-secondary fw-normal">· {{ printer.sn }}</span>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2">
-                            <span id="badge-mqtt" class="badge">MQTT</span>
-                            <span id="badge-pppp" class="badge">PPPP</span>
-                            {% if video_supported %}
-                            <span id="badge-video" class="badge">VIDEO</span>
-                            {% endif %}
-                            <span id="badge-ctrl" class="badge">CTRL</span>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-
                 {% if video_supported %}
                 <div class="card mb-3">
                     <div class="card-header">Camera</div>
@@ -116,8 +96,10 @@
                                             data-input-type="number"
                                             data-input-min="0"
                                             data-input-max="300"
+                                            data-picker-step="5"
                                             data-input-icon-class="icon-hotend"
                                             data-input-unit="°C"
+                                            data-clear-on-open="true"
                                             disabled
                                         >
                                             0&deg;C
@@ -141,8 +123,10 @@
                                             data-input-type="number"
                                             data-input-min="0"
                                             data-input-max="100"
+                                            data-picker-step="5"
                                             data-input-icon-class="icon-bed"
                                             data-input-unit="°C"
+                                            data-clear-on-open="true"
                                             disabled
                                         >
                                             0&deg;C
