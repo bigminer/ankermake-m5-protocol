@@ -261,16 +261,16 @@ requires the configured slicer API key.
 Raw G-code, fan, jog and temperature controls use the known
 `GCODE_COMMAND` MQTT primitive.
 
-The Control-tab Home button uses the same app-level `MOVE_ZERO` operation as
-eufyMake (`commandType: 1026`, `value: 2`). This delegates the complete X/Y/Z
-sequence and nozzle-probe setup to the printer communication module. It does
-not send raw `G28`.
+The Control-tab Home button is disabled. Two supervised tests on this M5C
+drove the nozzle into the build plate without the expected probe detection:
+a direct standalone `G28`, and eufyMake's app-level `MOVE_ZERO` operation
+(`commandType: 1026`, `value: 2`). The operator cut power during both tests.
 
-A direct standalone `G28` was observed driving the nozzle into the build plate
-without the expected probe detection stopping the move. The web terminal still
-rejects bare `G28` and any `G28 Z` command so the app-level safety path cannot
-be bypassed accidentally. Explicit X/Y-only `G28 X Y` remains available for
-diagnostics, but it never establishes a Z home position.
+The browser and `/ws/ctrl` server endpoint reject bare `G28`, any `G28 Z`, and
+`MOVE_ZERO`, so the safety guard cannot be bypassed by crafting a websocket
+message. Explicit X/Y-only `G28 X Y` remains available for diagnostics, but it
+never establishes a Z home position. Full web homing must not be re-enabled
+until the missing nozzle-probe preparation sequence is understood and tested.
 
 Jogging sends `G91`, the bounded `G1` move, and `G90` as three separate MQTT
 messages. Marlin treats a semicolon as the beginning of a comment, so combining

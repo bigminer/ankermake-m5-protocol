@@ -30,6 +30,7 @@ import hmac
 import ipaddress
 import os
 import json
+import re
 import time
 import logging as log
 
@@ -210,6 +211,27 @@ PRINTERS_WITHOUT_CAMERA = ["V8110"]
 
 
 CTRL_MQTT_REPLY_TIMEOUT = 10
+_GCODE_COMMAND = 0x0413
+_MOVE_ZERO = 0x0402
+
+
+def _unsafe_web_homing(mqtt):
+    """Return whether a browser MQTT payload could initiate unsafe Z homing."""
+    command_type = mqtt.get("commandType")
+    if command_type == _MOVE_ZERO:
+        return True
+    if command_type != _GCODE_COMMAND:
+        return False
+
+    for line in re.split(r"[\r\n]+", str(mqtt.get("cmdData", ""))):
+        command = line.split(";", 1)[0].strip().upper()
+        command = re.sub(r"^N\d+\s*", "", command)
+        if not re.match(r"^G28(?:\s|$)", command):
+            continue
+        axes = re.findall(r"[XYZ]", command[3:])
+        if not axes or "Z" in axes:
+            return True
+    return False
 
 
 def ctrl_send_mqtt(sock, msg):
@@ -220,16 +242,30 @@ def ctrl_send_mqtt(sock, msg):
     network loop (which is not thread-safe), and messages arriving while we
     wait still reach every other subscriber.
     """
-    command_type = msg["mqtt"]["commandType"]
+    mqtt = msg["mqtt"]
+    command_type = mqtt["commandType"]
+
+    if _unsafe_web_homing(mqtt):
+        response = {
+            "commandType": command_type,
+            "ankerctlError": (
+                "Web Z homing is disabled because it did not safely engage "
+                "the M5C nozzle probe"
+            ),
+        }
+        if "requestId" in msg:
+            response["requestId"] = msg["requestId"]
+        sock.send(json.dumps(response))
+        return
 
     with app.svc.borrow("mqttqueue") as mq:
         if not msg.get("awaitResponse"):
-            mq.transport.command(msg["mqtt"])
+            mq.transport.command(mqtt)
             return
 
         replies = Queue()
         with mq.tap(replies.put):
-            mq.transport.command(msg["mqtt"])
+            mq.transport.command(mqtt)
 
             reply = None
             deadline = time.monotonic() + CTRL_MQTT_REPLY_TIMEOUT

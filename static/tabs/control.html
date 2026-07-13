@@ -113,9 +113,9 @@
                         <button class="btn btn-secondary jog-btn control-command" data-axis="Z" data-dir="1" type="button" disabled>Z+</button>
 
                         <button class="btn btn-secondary jog-btn control-command" data-axis="X" data-dir="-1" type="button" disabled>X-</button>
-                        <button class="btn btn-secondary control-command" id="jog-home" type="button" disabled
+                        <button class="btn btn-secondary" id="jog-home" type="button" disabled
                                 aria-label="Home all axes"
-                                title="Home all axes using the M5C app-level homing sequence">
+                                title="Disabled: web homing does not safely engage the M5C nozzle probe">
                             {{ macro.bi_icon("house-fill") }}
                         </button>
                         <button class="btn btn-secondary jog-btn control-command" data-axis="X" data-dir="1" type="button" disabled>X+</button>
@@ -124,8 +124,8 @@
                         <button class="btn btn-secondary jog-btn control-command" data-axis="Y" data-dir="-1" type="button" disabled>Y-</button>
                         <button class="btn btn-secondary jog-btn control-command" data-axis="Z" data-dir="-1" type="button" disabled>Z-</button>
                     </div>
-                    <p class="small text-body-secondary mb-0 mt-3">
-                        Home uses the M5C's full X/Y/Z homing sequence, including its nozzle probe.
+                    <p class="small text-warning mb-0 mt-3">
+                        Home is disabled: web homing does not safely engage the M5C's nozzle probe.
                     </p>
                 </div>
             </div>

@@ -451,6 +451,67 @@ class WebUiTestCase(unittest.TestCase):
         fake_client.command.assert_called_once_with(message["mqtt"])
         self.assertEqual(fake_socket.sent, [])
 
+    def test_ws_ctrl_blocks_move_zero_before_transport(self):
+        fake_socket = FakeSocket([])
+        message = {
+            "mqtt": {"commandType": 0x0402, "value": 2},
+            "awaitResponse": False,
+        }
+
+        with mock.patch.object(app.svc, "borrow") as borrow:
+            ctrl_send_mqtt(fake_socket, message)
+
+        borrow.assert_not_called()
+        response = json.loads(fake_socket.sent[0])
+        self.assertEqual(response["commandType"], 0x0402)
+        self.assertIn("disabled", response["ankerctlError"])
+
+    def test_ws_ctrl_blocks_z_homing_but_allows_xy(self):
+        fake_client = mock.Mock()
+        fake_socket = FakeSocket([])
+
+        class FakeMqttService:
+            transport = fake_client
+
+        @contextlib.contextmanager
+        def fake_borrow(name):
+            self.assertEqual(name, "mqttqueue")
+            yield FakeMqttService()
+
+        blocked = (
+            "G28", "G28 Z", "G28 X Z", "G28 ; home",
+            "G28 X Y\nG28 Z", "N20 G28 Z",
+        )
+        with mock.patch.object(app.svc, "borrow", fake_borrow):
+            for command in blocked:
+                ctrl_send_mqtt(fake_socket, {
+                    "mqtt": {
+                        "commandType": 0x0413,
+                        "cmdData": command,
+                        "cmdLen": len(command),
+                    },
+                    "awaitResponse": False,
+                })
+            ctrl_send_mqtt(fake_socket, {
+                "mqtt": {
+                    "commandType": 0x0413,
+                    "cmdData": "G28 X Y",
+                    "cmdLen": 7,
+                },
+                "awaitResponse": False,
+            })
+
+        self.assertEqual(len(fake_socket.sent), len(blocked))
+        self.assertTrue(all(
+            "ankerctlError" in json.loads(payload)
+            for payload in fake_socket.sent
+        ))
+        fake_client.command.assert_called_once_with({
+            "commandType": 0x0413,
+            "cmdData": "G28 X Y",
+            "cmdLen": 7,
+        })
+
     def test_ws_ctrl_matching_reply_after_unrelated_reply(self):
         app.config["access_token"] = ""
 

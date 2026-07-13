@@ -223,23 +223,21 @@ def test_control_buttons_enable_when_ctrl_socket_opens(page, live_http_server):
 
     assert page.locator("#print-pause").is_disabled()
     assert page.locator("#fan-apply").is_enabled()
-    assert page.locator("#jog-home").is_enabled()
+    assert page.locator("#jog-home").is_disabled()
     assert page.locator("#filament-extrude").is_disabled()
     assert page.locator("#z-offset-up").is_enabled()
 
 
-def test_home_uses_app_level_move_zero_not_raw_gcode(page, live_http_server):
+def test_home_stays_disabled_and_sends_no_command(page, live_http_server):
     _login(page, live_http_server)
     page.click("#control-tab")
-    page.on("dialog", lambda dialog: dialog.accept())
-    page.wait_for_function("!document.querySelector('#jog-home').disabled")
 
-    page.click("#jog-home")
-
-    assert {
-        "mqtt": {"commandType": 0x0402, "value": 2},
-        "awaitResponse": False,
-    } in _ctrl_frames(page)
+    assert page.locator("#jog-home").is_disabled()
+    assert "does not safely engage" in page.locator("#jog-home").get_attribute("title")
+    assert not any(
+        frame.get("mqtt", {}).get("commandType") == 0x0402
+        for frame in _ctrl_frames(page)
+    )
     assert _commands(page) == []
 
 
@@ -398,7 +396,8 @@ def test_control_buttons_send_expected_gcode_payloads(page, live_http_server):
             .emit({state: "idle", print: {name: ""}});
         """
     )
-    page.wait_for_function("!document.querySelector('#jog-home').disabled")
+    page.wait_for_function("!document.querySelector('.jog-btn').disabled")
+    assert page.locator("#jog-home").is_disabled()
 
     page.click("#fan-apply")
     page.locator("#fan-slider").evaluate(
