@@ -187,12 +187,12 @@ def ctrl_send_mqtt(sock, msg):
 
     with app.svc.borrow("mqttqueue") as mq:
         if not msg.get("awaitResponse"):
-            mq.client.command(msg["mqtt"])
+            mq.transport.command(msg["mqtt"])
             return
 
         replies = Queue()
         with mq.tap(replies.put):
-            mq.client.command(msg["mqtt"])
+            mq.transport.command(msg["mqtt"])
 
             reply = None
             deadline = time.monotonic() + CTRL_MQTT_REPLY_TIMEOUT

@@ -11,14 +11,15 @@ import cli.mqtt
 class MqttQueue(Service):
 
     def worker_start(self):
-        self.client = cli.mqtt.mqtt_open(
+        self.transport = cli.mqtt.mqtt_transport(
             app.config["config"],
             app.config["printer_index"],
             app.config["insecure"]
         )
+        self.transport.connect()
 
     def worker_run(self, timeout):
-        for msg, body in self.client.fetch(timeout=timeout):
+        for msg, body in self.transport.fetch(timeout=timeout):
             log.info(f"TOPIC [{msg.topic}]")
             log.debug(enhex(msg.payload[:]))
 
@@ -27,7 +28,7 @@ class MqttQueue(Service):
 
     def worker_stop(self):
         try:
-            self.client.disconnect()
+            self.transport.disconnect()
         except Exception as E:
-            log.warning(f"{self.name}: Failed to disconnect mqtt client ({E})")
-        del self.client
+            log.warning(f"{self.name}: Failed to disconnect mqtt transport ({E})")
+        del self.transport
