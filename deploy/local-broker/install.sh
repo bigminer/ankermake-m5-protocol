@@ -50,9 +50,14 @@ EOF
         -out "$PREFIX/certs/server.crt" \
         -days 3650 -config "$CNF"
     rm -f "$CNF"
-    chmod 0600 "$PREFIX/certs/server.key"
     chmod 0644 "$PREFIX/certs/server.crt"
 fi
+
+# The mosquitto daemon drops privileges to 'nobody' (see mosquitto.conf), so the
+# private key must be readable by that user. Keep it 0600 (not world-readable),
+# owned by nobody. Applied every run so a key from an older install is fixed too.
+chown nobody "$PREFIX/certs/server.key"
+chmod 0600 "$PREFIX/certs/server.key"
 
 # Install and (re)load the LaunchDaemons.
 for p in com.ankerm5c.mosquitto com.ankerm5c.dnsmasq com.ankerm5c.chrony com.ankerm5c.pf-loader; do
