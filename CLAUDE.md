@@ -16,3 +16,25 @@
   safe toolhead path. Read-only observation (e.g. `ankerctl mqtt monitor`,
   capturing existing traffic) does not require this, but starting a job or
   sending motion/heat/control does.
+
+## Repository hygiene — never commit or push secrets or personal config
+
+- **Never stage, commit, or push secrets or setup-specific values.** This repo is
+  public/shareable. Before every `git add`/`git commit`/`git push`, scan the diff
+  and refuse to include:
+  - **Secrets:** passwords, API keys, tokens, private keys/certs,
+    `ANKERCTL_TOKEN`, `ANKERCTL_SECRET_KEY`, Anker account credentials, and the
+    real config (`default.json` / `login.json`).
+  - **Unique / personal config:** real printer SN and DUID, LAN or Tailscale IPs
+    and hostnames, MAC addresses, `/Users/<name>` paths, personal webcam URLs.
+
+  How to apply: use the placeholder set (e.g. `192.168.1.50`, `AK00000000000000`,
+  `USPRAKM-000000-XXXXX`, `your-mac.your-tailnet.ts.net`, `/Users/you`,
+  `http://127.0.0.1:4470`) in any tracked file. Real values live only in
+  **`setup.local.conf`** (git-ignored); the committed template is
+  **`setup.local.conf.example`**. Do not add secrets to the tracked `.env`, and
+  keep its shared default `FLASK_HOST=127.0.0.1` (binding `0.0.0.0` exposes the
+  web UI on all interfaces — a local-only choice, not a committed default).
+
+  If a commit would include any of the above, stop and tell the operator instead
+  of committing.

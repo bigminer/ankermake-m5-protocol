@@ -50,16 +50,16 @@ class DecodePpppPcapTests(unittest.TestCase):
         self.assertEqual(json.loads(data), {"commandType": 1013, "cmdData": "G28"})
 
     def test_parse_udp_reads_pppp_ports(self):
-        frame = _udp("192.168.68.55", 40000, "192.168.68.57", 32108, b"\xf1\x30\x00\x00")
+        frame = _udp("192.168.1.10", 40000, "192.168.1.50", 32108, b"\xf1\x30\x00\x00")
         src, sport, dst, dport, payload = decode.parse_udp(frame, 1)
 
-        self.assertEqual((src, dst, dport), ("192.168.68.55", "192.168.68.57", 32108))
+        self.assertEqual((src, dst, dport), ("192.168.1.10", "192.168.1.50", 32108))
         self.assertEqual(payload[0], 0xF1)
 
     def test_full_pcap_decode_end_to_end(self):
         # a JSON command wrapped in a DRW, on an ephemeral (migrated) port
         drw = PktDrw(chan=0, index=0, data=_xzyh_json({"commandType": 1027})).pack()
-        frame = _udp("192.168.68.55", 55000, "192.168.68.57", 15181, drw)
+        frame = _udp("192.168.1.10", 55000, "192.168.1.50", 15181, drw)
 
         pcap = Path(self._out())
         _write_pcap(pcap, [frame])

@@ -1,38 +1,73 @@
 <div class="tab-pane fade" id="instructions" role="tabpanel" aria-labelledby="instructions-tab">
     <div class="container mb-4">
-        <div class="row g-3">
-            <div class="col-lg-6">
-                <h1 class="fs-3">Connecting PrusaSlicer/SuperSlicer</h1>
-                <ol class="list-group list-group-numbered mb-3">
-                    <li class="list-group-item">Go to "Printer settings" tab</li>
-                    <li class="list-group-item">Click the "Gear" icon {{ macro.bi_icon("gear-fill") }}
-                        (Add/Edit Physical Printer)</li>
-                    <li class="list-group-item">Fill in "Descriptive name for the printer" with whatever you like</li>
-                    <li class="list-group-item">Select your Ankermake printer instructions from the dropdown menu</li>
-                    <li class="list-group-item">Under "Host Type" select "OctoPrint"</li>
-                    <li class="list-group-item">In "Hostname, IP or URL" fill in with:
-                        <kbd id="octoPrintHost">{{ request_host }}:{{ request_port }}</kbd>
-                        {{ macro.clipboard_button("#octoPrintHost") }}
-                    </li>
-                    <li class="list-group-item">Leave "API Key / Password" blank</li>
-                    <li class="list-group-item">Click "Test" to validate input</li>
-                    <li class="list-group-item">Click "Ok" to close the window</li>
-                    <li class="list-group-item">Slice your file as normal</li>
-                    <li class="list-group-item">Click "G{{- macro.bi_icon("caret-right-fill") -}}" button to start
-                        direct upload to the printer</li>
-                    <li class="list-group-item">Click "Upload and print" - the "Upload"-only is not supported</li>
+        <div class="row g-3 justify-content-center">
+            <div class="col-lg-7">
+                <div class="card mb-3">
+                    <div class="card-header fs-4">Print from your slicer</div>
+                    <div class="card-body">
+                        <p class="text-body-secondary mb-3">
+                            ankerctl exposes an <strong>OctoPrint-compatible</strong> upload API, so
+                            any slicer that can "send to an OctoPrint host" can slice and print
+                            straight to your M5C. Point it at this address:
+                        </p>
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <kbd id="octoPrintHost" class="fs-6">{{ request_host }}:{{ request_port }}</kbd>
+                            {{ macro.clipboard_button("#octoPrintHost") }}
+                        </div>
+                        <p class="small text-body-secondary mb-0">Leave the API key blank — no key is required.</p>
+                    </div>
+                </div>
 
-                    <li class="list-group-item">Enjoy printing with ankerctl 😉</li>
-                </ol>
-                <span class="fw-light">
-                    Hint: <kbd>Ctrl+Shift+G</kbd> will slice and open the upload to printer window
-                </span>
-            </div>
-            <div class="col-lg-6 text-center">
-                <img src="/static/img/setup/prusaslicer-1.png" class="img-thumbnail mt-2" alt="step 1" />
-                <img src="/static/img/setup/prusaslicer-2.png" class="img-thumbnail mt-2" alt="step 2" />
-                <img src="/static/img/setup/prusaslicer-3.png" class="img-thumbnail mt-2" alt="step 3" />
-                <img src="/static/img/setup/prusaslicer-4.png" class="img-thumbnail mt-2" alt="step 4" />
+                <div class="card mb-3">
+                    <div class="card-header">OrcaSlicer</div>
+                    <div class="card-body">
+                        <ol class="list-group list-group-numbered">
+                            <li class="list-group-item">On the <strong>Prepare</strong> screen, click the
+                                connection icon {{ macro.bi_icon("reception-4") }} next to the printer dropdown</li>
+                            <li class="list-group-item">Set <strong>Host Type</strong> to
+                                <code>OctoPrint</code></li>
+                            <li class="list-group-item">Set <strong>Hostname, IP or URL</strong> to
+                                <kbd>{{ request_host }}:{{ request_port }}</kbd></li>
+                            <li class="list-group-item">Leave <strong>API Key</strong> empty</li>
+                            <li class="list-group-item">Click <strong>Test</strong> to confirm the
+                                connection, then <strong>OK</strong></li>
+                            <li class="list-group-item">Slice your plate, then click
+                                <strong>Print plate</strong></li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header">PrusaSlicer &amp; SuperSlicer</div>
+                    <div class="card-body">
+                        <p class="mb-2">The same setup works here — configure a
+                            <strong>Physical Printer</strong> and use
+                            <strong>Send and Print</strong>:</p>
+                        <ol class="list-group list-group-numbered">
+                            <li class="list-group-item">Open <strong>Printer Settings</strong> and click the
+                                gear icon {{ macro.bi_icon("gear-fill") }} to add a physical printer</li>
+                            <li class="list-group-item">Set <strong>Host Type</strong> to
+                                <code>OctoPrint</code>, <strong>Hostname</strong> to
+                                <kbd>{{ request_host }}:{{ request_port }}</kbd>, API key blank</li>
+                            <li class="list-group-item">Slice, then use the
+                                <strong>Send and Print</strong> action
+                                ({{ macro.bi_icon("caret-right-fill") }} next to Export)</li>
+                        </ol>
+                        <p class="small text-body-secondary mt-2 mb-0">
+                            Hint: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> slices and opens the
+                            send-to-printer dialog.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="callout callout-info d-flex gap-2" role="note">
+                    <span class="callout-icon">{{ macro.bi_icon("info-circle-fill") }}</span>
+                    <span>
+                        The printer can't store jobs, so <strong>upload-only isn't supported</strong> —
+                        a print starts as soon as the transfer finishes. With the pre-print hook
+                        enabled, expect a few minutes of heating and auto-leveling before the first move.
+                    </span>
+                </div>
             </div>
         </div>
     </div>

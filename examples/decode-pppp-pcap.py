@@ -8,13 +8,13 @@ streams in each direction, and prints the decoded frames -- most usefully the
 JSON `commandType` messages the official app exchanges with the printer.
 
 Usage:
-    python3 examples/decode-pppp-pcap.py capture.pcap [--printer 192.168.68.57]
+    python3 examples/decode-pppp-pcap.py capture.pcap [--printer 192.168.1.50]
 
 This is a research tool for mapping which commands the official eufyMake app
 sends locally vs. through Anker's cloud. Point tcpdump at the traffic first:
 
     sudo tcpdump -i en1 -w capture.pcap \\
-        '(udp port 32108 or udp port 32100) and host 192.168.68.57'
+        '(udp port 32108 or udp port 32100) and host 192.168.1.50'
 """
 
 import sys

@@ -56,16 +56,16 @@ G-code file.
 
 | Component | Location | Purpose |
 | --- | --- | --- |
-| `ankerctl` repository | `/Users/gary/ankermake-m5-protocol` | Printer service, web UI, MQTT and PPPP implementation |
-| Python environment | `/Users/gary/ankermake-m5-protocol/.venv` | Runtime dependencies |
-| Account/printer config | `/Users/gary/Library/Application Support/ankerctl/default.json` | Anker account, printer credentials, cached printer IP and webcam URL |
-| `ankerctl` LaunchAgent | `/Users/gary/Library/LaunchAgents/com.ankerctl.webserver.plist` | Starts the web service at login |
-| `ankerctl` log | `/Users/gary/ankermake-m5-protocol/ankerctl.log` | Web, MQTT, PPPP and upload events |
-| MediaMTX directory | `/Users/gary/mediamtx` | WebRTC relay, certificates and logs |
-| MediaMTX config | `/Users/gary/mediamtx/mediamtx.yml` | WebRTC listener and `ipadcam` path |
-| MediaMTX LaunchAgent | `/Users/gary/Library/LaunchAgents/com.mediamtx.webrtc.plist` | Starts the camera relay at login |
-| MediaMTX log | `/Users/gary/mediamtx/mediamtx.log` | Publisher, viewer and packet-loss events |
-| Orca M5C preset | `/Users/gary/Library/Application Support/OrcaSlicer/user/default/machine/Anker M5C.json` | Printer host and start G-code |
+| `ankerctl` repository | `/Users/you/ankermake-m5-protocol` | Printer service, web UI, MQTT and PPPP implementation |
+| Python environment | `/Users/you/ankermake-m5-protocol/.venv` | Runtime dependencies |
+| Account/printer config | `/Users/you/Library/Application Support/ankerctl/default.json` | Anker account, printer credentials, cached printer IP and webcam URL |
+| `ankerctl` LaunchAgent | `/Users/you/Library/LaunchAgents/com.ankerctl.webserver.plist` | Starts the web service at login |
+| `ankerctl` log | `/Users/you/ankermake-m5-protocol/ankerctl.log` | Web, MQTT, PPPP and upload events |
+| MediaMTX directory | `/Users/you/mediamtx` | WebRTC relay, certificates and logs |
+| MediaMTX config | `/Users/you/mediamtx/mediamtx.yml` | WebRTC listener and `ipadcam` path |
+| MediaMTX LaunchAgent | `/Users/you/Library/LaunchAgents/com.mediamtx.webrtc.plist` | Starts the camera relay at login |
+| MediaMTX log | `/Users/you/mediamtx/mediamtx.log` | Publisher, viewer and packet-loss events |
+| Orca M5C preset | `/Users/you/Library/Application Support/OrcaSlicer/user/default/machine/Anker M5C.json` | Printer host and start G-code |
 
 Snapshot versions:
 
@@ -82,11 +82,11 @@ Snapshot versions:
 | Endpoint | Use |
 | --- | --- |
 | `http://127.0.0.1:4470` | Local `ankerctl` web UI and Orca upload host |
-| `http://192.168.68.55:4470` | Mac LAN web UI |
-| `https://garys-mac-mini.tail55ce6a.ts.net:8889/ipadcam/publish` | iPad camera publisher |
-| `https://garys-mac-mini.tail55ce6a.ts.net:8889/ipadcam` | Camera viewer |
-| `100.115.64.31` | Mac Tailscale IPv4 address at time of documentation |
-| `192.168.68.57` | Printer LAN address at time of documentation |
+| `http://192.168.1.10:4470` | Mac LAN web UI |
+| `https://your-mac.your-tailnet.ts.net:8889/ipadcam/publish` | iPad camera publisher |
+| `https://your-mac.your-tailnet.ts.net:8889/ipadcam` | Camera viewer |
+| `100.100.100.100` | Mac Tailscale IPv4 address at time of documentation |
+| `192.168.1.50` | Printer LAN address at time of documentation |
 
 Relevant listeners:
 
@@ -105,7 +105,7 @@ not part of this printer stack.
 ### Repository and virtual environment
 
 ```sh
-cd /Users/gary
+cd /Users/you
 git clone https://github.com/Ankermgmt/ankermake-m5-protocol.git
 cd ankermake-m5-protocol
 
@@ -116,7 +116,7 @@ python3 -m venv .venv
 Import the Anker/eufyMake login configuration:
 
 ```sh
-cd /Users/gary/ankermake-m5-protocol
+cd /Users/you/ankermake-m5-protocol
 .venv/bin/python ankerctl.py config import
 .venv/bin/python ankerctl.py config show
 ```
@@ -129,8 +129,8 @@ commit it.
 The installed LaunchAgent runs:
 
 ```text
-/Users/gary/ankermake-m5-protocol/.venv/bin/python
-/Users/gary/ankermake-m5-protocol/ankerctl.py
+/Users/you/ankermake-m5-protocol/.venv/bin/python
+/Users/you/ankermake-m5-protocol/ankerctl.py
 --insecure webserver run --host 0.0.0.0
 ```
 
@@ -142,10 +142,10 @@ It uses:
 
 ```text
 Label:             com.ankerctl.webserver
-WorkingDirectory:  /Users/gary/ankermake-m5-protocol
+WorkingDirectory:  /Users/you/ankermake-m5-protocol
 RunAtLoad:         true
 KeepAlive:         true
-Log:               /Users/gary/ankermake-m5-protocol/ankerctl.log
+Log:               /Users/you/ankermake-m5-protocol/ankerctl.log
 ```
 
 Environment variables:
@@ -195,17 +195,17 @@ access token is enabled.
 ### Follow logs
 
 ```sh
-tail -f /Users/gary/ankermake-m5-protocol/ankerctl.log
+tail -f /Users/you/ankermake-m5-protocol/ankerctl.log
 ```
 
 Useful filters:
 
 ```sh
 grep -E 'Going to upload|File upload complete|Successfully sent print job' \
-  /Users/gary/ankermake-m5-protocol/ankerctl.log
+  /Users/you/ankermake-m5-protocol/ankerctl.log
 
 grep -Ei 'error|failed|timeout|connection lost' \
-  /Users/gary/ankermake-m5-protocol/ankerctl.log
+  /Users/you/ankermake-m5-protocol/ankerctl.log
 ```
 
 ### Restart only `ankerctl`
@@ -223,7 +223,7 @@ Restarting `ankerctl` does not restart the printer or MediaMTX.
 ```sh
 ping -c 2 192.168.2.2
 
-cd /Users/gary/ankermake-m5-protocol
+cd /Users/you/ankermake-m5-protocol
 .venv/bin/python ankerctl.py pppp lan-search
 ```
 
@@ -279,7 +279,7 @@ in `ankerctl.log` as `POST /api/files/local`.
 The saved user preset is:
 
 ```text
-/Users/gary/Library/Application Support/OrcaSlicer/user/default/machine/Anker M5C.json
+/Users/you/Library/Application Support/OrcaSlicer/user/default/machine/Anker M5C.json
 ```
 
 The required machine start G-code is:
@@ -332,7 +332,7 @@ started from the phone app.
 The live config is:
 
 ```text
-/Users/gary/Library/Application Support/ankerctl/default.json
+/Users/you/Library/Application Support/ankerctl/default.json
 ```
 
 It contains:
@@ -346,7 +346,7 @@ It contains:
 Safe summary command:
 
 ```sh
-cd /Users/gary/ankermake-m5-protocol
+cd /Users/you/ankermake-m5-protocol
 .venv/bin/python ankerctl.py config show
 ```
 
@@ -362,8 +362,8 @@ re-imported or upgraded.
 MediaMTX runs from:
 
 ```text
-/Users/gary/mediamtx/mediamtx
-/Users/gary/mediamtx/mediamtx.yml
+/Users/you/mediamtx/mediamtx
+/Users/you/mediamtx/mediamtx.yml
 ```
 
 The current configuration enables only encrypted WebRTC:
@@ -380,13 +380,13 @@ srt: no
 webrtc: yes
 webrtcAddress: :8889
 webrtcEncryption: yes
-webrtcServerCert: /Users/gary/mediamtx/tls.crt
-webrtcServerKey: /Users/gary/mediamtx/tls.key
+webrtcServerCert: /Users/you/mediamtx/tls.crt
+webrtcServerKey: /Users/you/mediamtx/tls.key
 webrtcLocalUDPAddress: :8189
 webrtcIPsFromInterfaces: no
 webrtcAdditionalHosts:
-  - 100.115.64.31
-  - garys-mac-mini.tail55ce6a.ts.net
+  - 100.100.100.100
+  - your-mac.your-tailnet.ts.net
 
 paths:
   ipadcam:
@@ -395,7 +395,7 @@ paths:
 The certificate is issued for:
 
 ```text
-garys-mac-mini.tail55ce6a.ts.net
+your-mac.your-tailnet.ts.net
 ```
 
 Use the DNS hostname, not the Tailscale IP, when certificate validation
@@ -414,7 +414,7 @@ Status and logs:
 
 ```sh
 launchctl print "gui/$(id -u)/com.mediamtx.webrtc"
-tail -f /Users/gary/mediamtx/mediamtx.log
+tail -f /Users/you/mediamtx/mediamtx.log
 lsof -nP -iTCP:8889 -sTCP:LISTEN
 lsof -nP -iUDP:8189
 ```
@@ -426,7 +426,7 @@ lsof -nP -iUDP:8189
 3. Open Safari to:
 
    ```text
-   https://garys-mac-mini.tail55ce6a.ts.net:8889/ipadcam/publish
+   https://your-mac.your-tailnet.ts.net:8889/ipadcam/publish
    ```
 
 4. Allow camera and microphone access.
@@ -436,7 +436,7 @@ lsof -nP -iUDP:8189
 Viewer:
 
 ```text
-https://garys-mac-mini.tail55ce6a.ts.net:8889/ipadcam
+https://your-mac.your-tailnet.ts.net:8889/ipadcam
 ```
 
 The viewer URL can be saved under **Setup → External Webcam URL** in the
@@ -448,14 +448,14 @@ Check tailnet devices:
 
 ```sh
 tailscale status
-tailscale ping 100.78.175.76
+tailscale ping 100.100.100.101
 ```
 
 Check publisher status through logs:
 
 ```sh
 grep -E "ipadcam|is publishing|stream is available|no stream is available" \
-  /Users/gary/mediamtx/mediamtx.log | tail -n 50
+  /Users/you/mediamtx/mediamtx.log | tail -n 50
 ```
 
 Healthy publisher messages:
@@ -491,8 +491,8 @@ For persistent packet loss:
 Mac identity at time of documentation:
 
 ```text
-MagicDNS: garys-mac-mini.tail55ce6a.ts.net
-IPv4:     100.115.64.31
+MagicDNS: your-mac.your-tailnet.ts.net
+IPv4:     100.100.100.100
 ```
 
 Useful commands:
@@ -540,7 +540,7 @@ The printer may need 30–60 seconds to rejoin the `M5C-Local` hotspot.
 
 ```sh
 ping -c 2 192.168.2.2
-tail -f /Users/gary/ankermake-m5-protocol/ankerctl.log
+tail -f /Users/you/ankermake-m5-protocol/ankerctl.log
 ```
 
 Look for:
@@ -647,7 +647,7 @@ The supported configuration is the original `G28` start sequence.
 Run the focused local tests:
 
 ```sh
-cd /Users/gary/ankermake-m5-protocol
+cd /Users/you/ankermake-m5-protocol
 .venv/bin/python -m unittest discover -s tests -v
 .venv/bin/python -m compileall -q web tests
 git diff --check
@@ -668,14 +668,14 @@ unrelated modifications when upgrading.
 Back up these items securely:
 
 ```text
-/Users/gary/ankermake-m5-protocol
-/Users/gary/Library/Application Support/ankerctl/default.json
-/Users/gary/Library/LaunchAgents/com.ankerctl.webserver.plist
-/Users/gary/mediamtx/mediamtx.yml
-/Users/gary/mediamtx/tls.crt
-/Users/gary/mediamtx/tls.key
-/Users/gary/Library/LaunchAgents/com.mediamtx.webrtc.plist
-/Users/gary/Library/Application Support/OrcaSlicer/user/default/machine/Anker M5C.json
+/Users/you/ankermake-m5-protocol
+/Users/you/Library/Application Support/ankerctl/default.json
+/Users/you/Library/LaunchAgents/com.ankerctl.webserver.plist
+/Users/you/mediamtx/mediamtx.yml
+/Users/you/mediamtx/tls.crt
+/Users/you/mediamtx/tls.key
+/Users/you/Library/LaunchAgents/com.mediamtx.webrtc.plist
+/Users/you/Library/Application Support/OrcaSlicer/user/default/machine/Anker M5C.json
 ```
 
 The backup contains credentials and private keys. Encrypt it and restrict file
@@ -687,7 +687,7 @@ Example permission audit:
 ls -l \
   "$HOME/Library/Application Support/ankerctl/default.json" \
   "$HOME/Library/LaunchAgents/com.ankerctl.webserver.plist" \
-  /Users/gary/mediamtx/tls.key
+  /Users/you/mediamtx/tls.key
 ```
 
 After restore:

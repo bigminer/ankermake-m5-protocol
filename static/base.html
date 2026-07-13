@@ -13,11 +13,14 @@
     </head>
     <body class="fullscreen-emulate">
         <!-- Header -->
-        <div class="bg-dark bg-gradient mb-3 fullscreen-emulate-d-none">
+        <div class="app-header fullscreen-emulate-d-none">
             <header class="container d-flex align-items-center py-2">
-                <a href="/" class="d-flex me-md-auto text-decoration-none">
+                <a href="/" class="app-brand d-flex me-md-auto text-decoration-none">
                     <img src="{{ url_for('static', filename='img/logo.svg') }}" class="me-2" alt="logo">
-                    <span class="text-body-emphasis align-self-baseline fs-4">ankerctl</span>
+                    <span class="align-self-center">
+                        <span class="app-wordmark">anker<b>ctl</b></span>
+                        <span class="app-tag">M5C · local control</span>
+                    </span>
                 </a>
                 <ul class="nav nav-pills align-items-baseline btn-group" id="tab" role="tablist">
                     {% block menu %}{% endblock %}

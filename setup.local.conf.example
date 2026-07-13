@@ -1,0 +1,35 @@
+# ankerctl — local setup values (TEMPLATE)
+#
+# Copy this file to `setup.local.conf` and fill in your own values:
+#
+#     cp setup.local.conf.example setup.local.conf
+#
+# `setup.local.conf` is git-ignored, so your real serial numbers, IPs, and
+# hostnames never get committed or shared. Optionally source it before running
+# the live-printer tests so the harness points at your printer:
+#
+#     set -a; . ./setup.local.conf; set +a
+#
+# The documentation under documentation/ uses these same placeholder values, so
+# you can read the runbooks with your own setup.local.conf open alongside.
+
+# --- Printer -------------------------------------------------------------
+PRINTER_SN=AK00000000000000            # serial (Setup tab, or the label on the printer)
+PRINTER_DUID=USPRAKM-000000-XXXXX      # device id
+PRINTER_IP=192.168.1.50                # printer's address on your LAN
+
+# --- Host running ankerctl ----------------------------------------------
+MAC_LAN_IP=192.168.1.10                # this machine's LAN IP
+REPO_DIR=/Users/you/ankermake-m5-protocol
+
+# --- Optional: remote access over Tailscale -----------------------------
+TAILSCALE_HOST=your-mac.your-tailnet.ts.net
+TAILSCALE_IP=100.100.100.100
+
+# --- Optional: external webcam (shown on the Live/Control tabs) ----------
+WEBCAM_URL=https://your-mac.your-tailnet.ts.net:8889/ipadcam
+
+# --- Live-printer test harness (tests/test_live_printer.py) -------------
+# Defaults to localhost; override to reach a printer on your LAN/Tailscale.
+ANKERCTL_TEST_BASE_URL=http://127.0.0.1:4470
+# ANKERCTL_TEST_TOKEN=your-web-ui-token

@@ -11,12 +11,15 @@
         {{ macro.static_css("ankersrv.css") }}
     </head>
     <body>
-        <div class="container" style="max-width: 24rem;">
-            <div class="text-center my-4">
-                <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="logo" height="48">
+        <div class="login-shell">
+          <div class="login-card">
+            <div class="text-center mb-4">
+                <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="logo" class="login-logo mb-2">
+                <div class="app-wordmark">anker<b>ctl</b></div>
+                <div class="app-tag">M5C · local control</div>
             </div>
 
-            <div class="container text-center" id="messages">
+            <div class="text-center" id="messages">
                 {% for category, message in get_flashed_messages(with_categories=true) %}
                 <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
                     <button type="button" class="btn-close btn-sm btn-close-white"
@@ -50,6 +53,7 @@
                     </form>
                 </div>
             </div>
+          </div>
         </div>
         {{ macro.static_script("vendor/bootstrap-5.3.0-alpha3-dist/js/bootstrap.bundle.min.js") }}
     </body>
