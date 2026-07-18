@@ -363,19 +363,25 @@ $(function () {
     const PRINTER_HEARTBEAT_INTERVAL_MS = 10000;
     const PRINTER_HEARTBEAT_STALE_MS = 15000;
     const PRINTER_HEARTBEAT_REPLY_TIMEOUT_MS = 5000;
+    const HEARTBEAT_REQUEST_ID = "printer-heartbeat";
 
     function printIsActive() {
         return /print|paus|resume/i.test(printerState) || currentPrintFile !== "";
+    }
+
+    // The printer is only considered live if it has said something recently.  An
+    // open control socket proves we reached ankerctl, not that ankerctl reached
+    // the printer: its service threads can wedge while still reporting Running.
+    function printerIsLive() {
+        return Date.now() - lastPrinterHeartbeat < PRINTER_HEARTBEAT_STALE_MS
+            || Date.now() - lastTelemetry < PRINTER_HEARTBEAT_STALE_MS;
     }
 
     function updatePrinterState() {
         let state;
         if (printIsActive()) {
             state = printerState;
-        } else if (
-            Date.now() - lastPrinterHeartbeat < PRINTER_HEARTBEAT_STALE_MS
-            || Date.now() - lastTelemetry < PRINTER_HEARTBEAT_STALE_MS
-        ) {
+        } else if (printerIsLive()) {
             state = "Ready";
         } else if (printerHeartbeatPending) {
             state = "Checking…";
@@ -396,7 +402,7 @@ $(function () {
             commandType: MqttMsgType.ZZ_MQTT_CMD_GCODE_COMMAND,
             cmdData: "M105",
             cmdLen: 4,
-        }, true, "printer-heartbeat");
+        }, true, HEARTBEAT_REQUEST_ID);
         printerHeartbeatTimeout = window.setTimeout(function () {
             printerHeartbeatPending = false;
             updatePrinterState();
@@ -409,6 +415,7 @@ $(function () {
         printerHeartbeatTimer = window.setInterval(function () {
             sendPrinterHeartbeat();
             updatePrinterState();
+            updateAttendedControls();
         }, PRINTER_HEARTBEAT_INTERVAL_MS);
     }
 
@@ -423,7 +430,9 @@ $(function () {
     }
 
     function updateAttendedControls() {
-        const controlReady = sockets.ctrl && sockets.ctrl.is_open;
+        // Gate on the printer answering, not merely on our socket to ankerctl
+        // being open: a wedged ankerctl accepts commands and drops them silently.
+        const controlReady = ctrlReady() && printerIsLive();
         const printActive = printIsActive();
         $("#print-pause, #print-resume, #print-stop").prop("disabled", !controlReady || !printActive);
         const canAdjustZ = controlReady && !printActive;
@@ -620,7 +629,7 @@ $(function () {
                 appendGcodeLog(`< Blocked: ${data.ankerctlError}`);
                 return;
             }
-            if (data.requestId === "printer-heartbeat") {
+            if (data.requestId === HEARTBEAT_REQUEST_ID) {
                 window.clearTimeout(printerHeartbeatTimeout);
                 printerHeartbeatTimeout = null;
                 printerHeartbeatPending = false;
@@ -630,6 +639,7 @@ $(function () {
                     lastPrinterHeartbeat = 0;
                 }
                 updatePrinterState();
+                updateAttendedControls();
                 return;
             }
             if (Object.prototype.hasOwnProperty.call(data, "mqttReply")) {
@@ -883,6 +893,12 @@ $(function () {
     function sendMqtt(message_data, awaitResponse = false, requestId = null) {
         if (!ctrlReady()) {
             flash_message("Control socket not connected", "warning");
+            return;
+        }
+        // The heartbeat is exempt: it is the probe that re-establishes liveness,
+        // so blocking it while offline would make recovery impossible.
+        if (requestId !== HEARTBEAT_REQUEST_ID && !printerIsLive()) {
+            flash_message("Printer is not responding — command not sent", "danger");
             return;
         }
         const message = {

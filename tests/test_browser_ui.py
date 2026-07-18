@@ -215,11 +215,37 @@ def test_home_hides_transport_protocol_details(page, live_http_server):
     assert page.locator("#printer-connection").count() == 0
 
 
-def test_control_buttons_enable_when_ctrl_socket_opens(page, live_http_server):
+def _make_printer_live(page):
+    """Answer the heartbeat so the UI treats the printer as present.
+
+    Controls gate on the printer answering, not on the ctrl socket being open --
+    an open socket only proves we reached ankerctl, which can wedge and drop
+    commands silently.
+    """
+    page.wait_for_function(
+        "window.__wsSent.some((item) => item.payload.requestId === 'printer-heartbeat')"
+    )
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/ctrl"))
+            .emit({requestId: "printer-heartbeat", mqttReply: {resData: "ok T:20"}});
+        """
+    )
+    page.wait_for_function(
+        "document.querySelector('#control-printer-state').textContent === 'Ready'"
+    )
+
+
+def test_control_buttons_require_a_live_printer(page, live_http_server):
     _login(page, live_http_server)
 
     page.click("#control-tab")
     page.wait_for_function("!document.querySelector('#fan-apply').disabled")
+
+    # An open ctrl socket alone must not enable printer controls.
+    assert page.locator("#z-offset-up").is_disabled()
+
+    _make_printer_live(page)
 
     assert page.locator("#print-pause").is_disabled()
     assert page.locator("#fan-apply").is_enabled()
@@ -245,6 +271,7 @@ def test_web_terminal_blocks_z_homing_but_allows_xy_homing(page, live_http_serve
     _login(page, live_http_server)
     page.click("#control-tab")
     page.wait_for_function("!document.querySelector('#gcode-input').disabled")
+    _make_printer_live(page)
 
     page.fill("#gcode-input", "G28")
     page.press("#gcode-input", "Enter")
@@ -283,6 +310,53 @@ def test_printer_state_requires_a_heartbeat_reply(page, live_http_server):
     )
     page.wait_for_function(
         "document.querySelector('#control-printer-state').textContent === 'Offline'"
+    )
+
+
+def test_controls_disable_when_the_printer_stops_answering(page, live_http_server):
+    """An open ctrl socket only proves we reached ankerctl.  When the printer
+    itself stops answering, the controls must go dead rather than accept clicks
+    that are silently dropped."""
+    _login(page, live_http_server)
+    _make_printer_live(page)
+    page.wait_for_function("!document.querySelector('.jog-btn').disabled")
+
+    # Printer stops answering while the ctrl socket stays open.
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/ctrl"))
+            .emit({requestId: "printer-heartbeat", mqttReply: null});
+        """
+    )
+    page.wait_for_function("document.querySelector('#control-printer-state').textContent === 'Offline'")
+    assert page.locator(".jog-btn").first.is_disabled()
+    assert page.locator("#z-offset-up").is_disabled()
+    assert page.locator("#filament-extrude").is_disabled()
+
+
+def test_offline_printer_refuses_to_send_but_still_heartbeats(page, live_http_server):
+    """The send guard must block user commands when the printer is offline, yet
+    let the heartbeat through -- it is what re-establishes liveness."""
+    _login(page, live_http_server)
+    page.click("#control-tab")
+    _make_printer_live(page)
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/ctrl"))
+            .emit({requestId: "printer-heartbeat", mqttReply: null});
+        """
+    )
+    page.wait_for_function("document.querySelector('#control-printer-state').textContent === 'Offline'")
+
+    page.evaluate("window.__wsSent.length = 0")
+    page.fill("#gcode-input", "M105")
+    page.press("#gcode-input", "Enter")
+    assert _commands(page) == [], "a command was sent to an offline printer"
+
+    # The heartbeat must still be exempt from the guard.
+    page.wait_for_function(
+        "window.__wsSent.some((item) => item.payload.requestId === 'printer-heartbeat')"
     )
 
 

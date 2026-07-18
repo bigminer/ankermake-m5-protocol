@@ -1,5 +1,20 @@
 # Project Instructions
 
+## Before diagnosing the printer
+
+- **Read [`documentation/printer-findings.md`](documentation/printer-findings.md) first**
+  — it records what we know, what failed, and which conclusions were retracted.
+  Append what you learn, with a status. Don't delete refuted entries.
+
+- **If the printer seems dead, restart `ankerctl` before diagnosing anything else.**
+  `launchctl kickstart -k gui/$(id -u)/com.ankerctl.webserver`
+
+  Why: its service threads wedge and keep reporting `Running` while receiving
+  nothing. On 2026-07-15 this cost an hour chasing pf, dnsmasq, and mosquitto —
+  all healthy. The printer was publishing to the broker the entire time. Check
+  `/opt/ankerm5c/logs/mosquitto.out.log` to see what the printer is *actually*
+  doing; ankerctl's status API only reports its own threads, not the printer.
+
 ## Printer safety
 
 - **Always confirm the human is present before operating the 3D printer
@@ -38,3 +53,17 @@
 
   If a commit would include any of the above, stop and tell the operator instead
   of committing.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked as GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the default five-label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses the single-context layout. See `docs/agents/domain.md`.
