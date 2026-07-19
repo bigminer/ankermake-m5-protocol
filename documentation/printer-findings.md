@@ -54,8 +54,8 @@ in Retracted claims.
 | Command | Does | Evidence | Verified |
 | --- | --- | --- | --- |
 | `M401` | ⚠️ **Lifts Z ~14.9mm** and sets `Z:2.00`. Does **not** arm the probe. | count `-5160`→`800` (+5960 = 14.9mm), camera confirmed ~15mm lift; `M119` still `z_probe: open` after. `Z:2.00` exactly matches `ANTHER_Z_RISE_DISTANCE 2` | 2026-07-15 01:01:57 |
-| `G91` / `G1 Z<n>` / `G90` | Relative jog. **Send as three separate messages** — Marlin treats `;` as a comment, so `G91;G1...;G90` silently runs only `G91` | jog traces track exactly 400 counts/mm | 2026-07-15 00:38–01:01 |
-| `G28 X Y` | Homes X/Y against **real** endstops (`x_min`, `y_max`). The only homing form `/ws/ctrl` permits | guard logic in `web/__init__.py`; endstops present in `M119` | **NOT run live** — `UNVERIFIED` |
+| `G91` / `G1 Z<n>` / `G90` | Relative **Z** jog. **Send as three separate messages** — Marlin treats `;` as a comment, so `G91;G1...;G90` silently runs only `G91`. Do not generalize this result to X/Y: later unhomed X/Y requests replied `echo:Home X/Y` and did not move. | Z jog traces track exactly 400 counts/mm | 2026-07-15 00:38–01:01 |
+| `G28 X Y` | Expected to home X/Y against **real** endstops (`x_min`, `y_max`). The only homing form `/ws/ctrl` permits | guard logic in `web/__init__.py`; endstops present in `M119` | behavior **NOT run live** — `UNVERIFIED`, not established safe |
 
 ### Known-dangerous — do not send
 
@@ -71,7 +71,7 @@ in Retracted claims.
 
 | Command | Expected | Status |
 | --- | --- | --- |
-| `G92 Z0` | Declares current position as zero. **No motion** — a declaration, not a move. The mechanism for manual zeroing. | `UNVERIFIED` |
+| `G92 Z0` | Expected to declare current position as zero without motion; proposed mechanism for manual logical zeroing. | `UNVERIFIED` — not yet sent/observed on this printer |
 | `M290 Z<n>` | Babystep. **Invisible to `M114`** (shifts carriage without changing logical position) — will desync any position monitor. The UI's z-offset buttons use this; the jog buttons don't. | `STRONG`, inferred from `static/ankersrv.js` + count behaviour |
 | `M500` / `M501` | Save/load EEPROM. Untouched. | `UNVERIFIED` |
 
@@ -121,16 +121,28 @@ plutil -extract EnvironmentVariables.ANKERCTL_TOKEN raw -o - \
 | Gotcha | Reality |
 | --- | --- |
 | `/ws/ctrl` replies `{"ankerctl": 1}` | **That is not the printer's reply.** It's an ack from ankerctl. The real reply arrives on `/ws/mqtt` as commandType `1043` with `resData`. Listen there. |
-| `1043` traffic floods with temp polls | Something polls `M105` constantly. Filter replies starting `ok T:` or you'll drown. |
+| `1043` traffic floods with temp polls | Before the 2026-07-19 uncommitted mitigation, the browser polled `M105` every 10s even while telemetry flowed. Filter replies starting `ok T:` when reading older captures. Fresh `/ws/state` traffic now suppresses the next poll in browser tests; live revalidation is still needed. |
 | Background monitors print nothing | Python buffers stdout to a file. Use `python -u`. |
 | Playwright screenshots vanish | They land in the **repo root**, not the output dir. Move them out; keep the worktree clean. |
 | `ankerctl mqtt monitor` fails to connect | It dials cloud (`make-mqtt.ankermake.com`). The printer is on the **local broker**. Use the running service's websockets instead. |
 | Printer silent right after a power cycle | Needs 30–60s to rejoin the `M5C-Local` hotspot. Silence ≠ a result. `ping` the hotspot lease first. |
 | Replies carry a `+ringbuf:N,512,M` suffix | Anker-specific. Ignore it when parsing. |
 | **Sends fail *silently* when ankerctl is wedged** | No error, no timeout, no clue. Confirm telemetry is flowing *before* sending. `2026-07-15 01:25` |
-| "The printer is silent" almost always means **ankerctl**, not the printer | Check `/opt/ankerm5c/logs/mosquitto.out.log` — it shows the printer's real PUBLISHes, independent of ankerctl. Restart ankerctl before diagnosing anything else. |
+| "The printer is silent" means **ankerctl**, not the printer | `REFUTED` as a general rule on 2026-07-19. It described the 2026-07-15 wedge, but a later print lost the printer's broker client and hotspot neighbor while `ankerctl` and the local stack stayed healthy. Check the broker log first and branch on whether printer PUBLISHes continue. |
 
-### ⚠️ FIRST: if the printer seems dead, restart ankerctl
+### ⚠️ FIRST: locate the silent layer before restarting anything
+
+Check `/opt/ankerm5c/logs/mosquitto.out.log` first:
+
+- Printer PUBLISHes are still growing but web state is stale: the printer and
+  broker are alive; an `ankerctl` restart is a supported recovery attempt.
+- The printer client disconnected and PUBLISHes stopped: restarting `ankerctl`
+  cannot force the remote printer back onto the hotspot. Check ARP/ping,
+  hotspot association, and radio placement. Any printer power cycle still
+  requires a present operator and explicit authorization.
+
+The restart-first account below is retained as a dated incident, not a general
+runbook.
 
 ```sh
 launchctl kickstart -k gui/$(id -u)/com.ankerctl.webserver
@@ -141,11 +153,14 @@ They keep reporting `Running` while receiving nothing. Symptoms look exactly lik
 dead printer: no telemetry, jog buttons do nothing, uploads stall at `Sending file
 contents`, `M114` gets no reply. `/ws/pppp-state` throws `ServiceStoppedError`.
 
-**The printer is probably fine.** Check what it's *actually* doing:
+**In that 2026-07-15 incident, the printer was fine.** The distinguishing check
+was what the broker was actually receiving:
 ```sh
 tail -f /opt/ankerm5c/logs/mosquitto.out.log   # printer's own PUBLISHes
 ```
-If that's growing, the printer is healthy and ankerctl is the problem.
+If that is growing, the printer-to-broker path is healthy and `ankerctl` is the
+likely problem. If it is not growing, do not infer the same diagnosis; the
+2026-07-19 hotspot/MQTT disconnect requires separate network recovery.
 
 This cost an hour on 2026-07-15 chasing pf anchors, dnsmasq, and mosquitto — **all
 healthy**. The printer had rejoined the broker minutes after a power cycle and was
@@ -247,9 +262,12 @@ current explanation for why probing never engages: **we have been asking the
 printer to probe from a coordinate frame it does not trust.** A real print homes
 XY first, which is why real prints probe fine.
 
-Status: `STRONG`. **Untested.** The test is `G28 X Y` (safe — real endstops,
-`x_min`/`y_max`; also the one form `/ws/ctrl` permits) → `M114` to see if the
-position was lying → move to bed center → retry probe.
+Status: `STRONG`. **Untested.** The proposed test starts with `G28 X Y` (real
+`x_min`/`y_max` endstops; also the one form `/ws/ctrl` permits) followed by
+`M114` to see if the position was lying. It has not been run live and must not
+be called safe merely because the endstops exist. Any later move-to-center/probe
+experiment needs a separate safety review and fresh operator confirmation; the
+two known standalone Z-homing attempts remain blocked.
 
 ### Retracted claims — do not re-derive these
 
@@ -268,24 +286,30 @@ position was lying → move to bed center → retry probe.
 | Finding | Evidence | Status |
 | --- | --- | --- |
 | `M114` works: reports X/Y/Z + raw stepper counts | `X:-15.00 Y:232.50 Z:11.55 Count X:-1920 Y:29760 Z:4620` | `CONFIRMED` |
-| Z is **400 steps/mm** | Every 1mm jog = 400 counts; every 10mm = 4000, across a 51mm span | `CONFIRMED` |
+| Z is **400 steps/mm** | Every observed 1mm Z jog = 400 counts; every 10mm Z jog = 4000, across a 51mm Z span | `CONFIRMED` |
 | **X/Y counts survive a power cycle exactly; Z resets to 0** | Before/after reboot: X `-1920`→`-1920`, Y `29760`→`29760`, Z `4620`→`0` | `CONFIRMED` |
 | Therefore **recording a Z number across a reboot is worthless** | Counter zeroes regardless of physical position | `CONFIRMED` |
 | Reported Z is **not stable across commands** — track the **count** | `M401` cleared a `+0.25` offset; the same physical point went `-12.55` → `-12.80` | `CONFIRMED` |
 | A `+0.25mm` offset exists below zero, origin unknown | count 0 → `Z:0.25`; cleared by `M401` | `UNVERIFIED` |
 | `M851` reports `Probe Offset X0 Y0 Z0.02` | direct read | `CONFIRMED` |
 | A stored Z offset can't be made durable without a Z home | An offset needs a repeatable datum; homing *is* the datum | `STRONG` |
+| Supervised 1mm X+/X-/Y+/Y- relative request pair left the reported frame unchanged | each `G91` → bounded `G1` → `G90` sequence was accepted; afterward `M114` reported X:-15.00, Y:232.50, Count X:-1920/Y:29760 | request/reply `CONFIRMED`; later operator review confirmed no physical motion |
+| Supervised 10mm X+/X-/Y+/Y- relative request pair left the reported frame unchanged | each `G91` → `G1 … F3000` → `G90` sequence was accepted; afterward `M114` again reported X:-15.00, Y:232.50, Count X:-1920/Y:29760 | request/reply `CONFIRMED`; later operator review confirmed no physical motion |
+| Supervised 50mm X+/X-/Y+/Y- relative request sequence repeated three times left the reported frame unchanged | operator confirmed clearance; all 12 bounded `G91` → `G1 … F3000` → `G90` legs were accepted; afterward `M114` reported X:-15.00, Y:232.50, Count X:-1920/Y:29760 | request/reply `CONFIRMED`; operator observed no physical motion |
+| Raw relative X/Y jog requests did not produce observable motion | operator watched the earlier 1mm/10mm tests and the 3×50mm sequence; none moved despite broker delivery and printer replies. Each `G1 X…`/`G1 Y…` reply included `echo:Home X`/`echo:Home Y`. | `CONFIRMED` for the observed no-motion result; root cause `UNVERIFIED` |
 
-### Manual zeroing works (2026-07-15)
+### Manual plate finding works; logical zeroing needs revalidation (2026-07-15)
 
-The operator established a Z reference the probe could not: jog down, paper-drag
-test, 0.1mm steps. **Plate found at count -5120.** `G28`/`MOVE_ZERO`/`G36`/`M401`
-all failed to do this; hands and a sheet of paper took four minutes.
+The operator established a physical Z reference the probe could not: jog down,
+paper-drag test, 0.1mm steps. **Plate found at count -5120.**
+`G28`/`MOVE_ZERO`/`G36`/`M401` all failed to do this; hands and a sheet of paper
+took four minutes.
 
 `SESSION-ONLY` — and unavoidably so. It works *because* the operator is the datum,
 and a person's judgement can't be serialized to EEPROM. Per power cycle, redo it.
-Mechanism is `G92 Z0` (a declaration, no motion), **not** record-and-replay: a
-replayed Z from a dead frame is a plunge.
+`G92 Z0` is the proposed declaration mechanism, but it was not validated in this
+session and remains `UNVERIFIED`. Never record-and-replay the count: a replayed Z
+from a dead frame is a plunge.
 
 ---
 
@@ -293,13 +317,61 @@ replayed Z from a dead frame is a plunge.
 
 | Finding | Evidence | Status |
 | --- | --- | --- |
-| `APP_QUERY_STATUS` (`0x403`/1027) is the **best diagnostic we have** | Unprompted, the printer sends only temps. This query returns ~16 types. | `CONFIRMED` |
-| Persistent red blink = **suspended print**, not a fault | `1039 {"breakPoint": 1}` + `1052 {"real_print_layer": 6}` | `CONFIRMED` |
+| `APP_QUERY_STATUS` (`0x403`/1027) is the **broadest diagnostic query we have** | Idle captures mainly emitted temperatures; this query returned ~16 types. It still cannot answer after the printer's MQTT client disconnects. | response breadth `CONFIRMED` |
+| The persistent red blink observed in this incident represented a **suspended print**, not a fault | `1039 {"breakPoint": 1}` + `1052 {"real_print_layer": 6}` | this incident `CONFIRMED`; do not generalize every red indication |
 | A long-press on the physical button clears it | Red→green; `1039` stopped reporting; layer 6→0; 180C hold released | `CONFIRMED` |
 | Power-cycling does **not** clear it — it's stored state, not a fault | Operator power-cycled; blink persisted | `CONFIRMED` |
 | `1067` returns the physical button map (idle vs busy) | direct read | `CONFIRMED` |
 | `1021 Z_AXIS_RECOUP: -5` is a **constant**, not crash damage | Unchanged across every state we've seen | `CONFIRMED` |
 | `1072 isLeveled: 1` — leveling survived both plate strikes | direct read | `CONFIRMED` |
+
+### Supervised fan and low-temperature requests (2026-07-19)
+
+After the operator confirmed attendance, a clear bed, and a safe toolhead path,
+the live preflight showed that the web service was reachable but the initial
+`M105` received no printer reply within 10 seconds. Restarting `ankerctl` made a
+subsequent `M105` reply immediately available. The supervised control requests
+then completed: part fan 50% then off (`M106 S128`, `M107`), nozzle target 40C
+then 0C (`M104 S40`, `M104 S0`), and bed target 35C then 0C (`M140 S35`,
+`M140 S0`).
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| The service can be reachable while a printer reply is absent; restarting `ankerctl` restored an `M105` reply | initial 10s `M105` timeout; retry passed after restart | `CONFIRMED` |
+| Fan and low-temperature requests were accepted by the control path | supervised live tests completed without control errors | `CONFIRMED` |
+| Both heater targets were cleared after the supervised check | follow-up `M105`: `T:21.00 /0.00 B:21.04 /0.00` (current / target) | `CONFIRMED` |
+| The `M107` fan-off request was accepted; resulting fan state is unavailable | the status and `M105` replies expose no fan-state field | physical fan-off outcome `UNVERIFIED` |
+
+Later in the same supervised session, the operator requested that the settings
+remain active across an `ankerctl` restart. The control path accepted `M106
+S128` (50% part fan), `M104 S40`, and `M140 S35`; after the restart, the broad
+status query reported idle state and `M105` reported `T:39.00 /40.00 B:26.16
+/35.00`. The restart therefore did not clear the heater targets.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| Low heater targets persist across an `ankerctl` restart | post-restart `M105`: nozzle 39.00/40.00C, bed 26.16/35.00C | `CONFIRMED` |
+| Whether the 50% part-fan request persists across an `ankerctl` restart | command was accepted, but no fan-state telemetry exists | `UNVERIFIED` |
+| Supervised shutdown cleared both heater targets | `M107`, `M104 S0`, and `M140 S0` accepted; immediate `M105`: nozzle 40.00/0.00C, bed 34.87/0.00C | `CONFIRMED` |
+
+### Orca-started job observation (2026-07-19)
+
+The operator started a job through Orca while this session issued no printer
+action. A read-only status query found an active queued job with zero progress
+and zero completed layers. `M105` reported nozzle 149/150C and bed 42.94/60C,
+consistent with the printer's preheat/start phase.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| An Orca-started job reaches the printer through the local control setup | read-only status reported a queued job and its layer metadata | `CONFIRMED` |
+| The printer owns its preheat targets during job start | `M105`: nozzle 149/150C, bed 42.94/60C | `CONFIRMED` |
+| The job transitions from queued/start to printing during its own calibration sequence | subsequent read-only status reported printer state value 1, still at zero progress/layers | `CONFIRMED` |
+| A direct `M105` request may time out while the start sequence is active | status query still returned printing state; the following `M105` received no reply within 10s | `CONFIRMED` for the timeout; cause `UNVERIFIED` |
+| MQTT observation can stop while a job continues physically | operator observed the job continue and finish; broker notices stopped, direct local subscription received no packets, and the web state/reply paths timed out | `CONFIRMED` for the observation gap; cause `UNVERIFIED` |
+| Restarting `ankerctl` after this job did not immediately restore an `M105` reply | authenticated `M105` still timed out after restart and a settling interval | `CONFIRMED` |
+| The gap began when the printer's broker client disconnected; it made no observed reconnect attempt | broker logged the printer client disconnecting with `Host is down`; later control requests still reached the broker but had no printer subscriber and produced no reply | `CONFIRMED` |
+| The Mac's local-broker/hotspot stack remained healthy while the printer disappeared from the hotspot | broker, DNS, NTP, Internet Sharing bridge, and pf checks all passed; the printer had 100% loss, no ARP entry, and no response on its known local service ports | observations `CONFIRMED`; weak/offline printer Wi-Fi or an address change `SUPPORTED`, not distinguished |
+| Fixed-rate `M105` polling is redundant while normalized state telemetry is arriving | browser regression test shows fresh `/ws/state` traffic suppresses the next heartbeat; one probe resumes after the 15-second stale threshold | `CONFIRMED` in browser test; prevention of a printer Wi-Fi/MQTT disconnect `UNVERIFIED` |
 
 **Lesson worth more than any single reading: when this printer has a hard problem,
 the answer has repeatedly been its own physical interface or the runbook — not a

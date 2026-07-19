@@ -377,6 +377,10 @@ $(function () {
             || Date.now() - lastTelemetry < PRINTER_HEARTBEAT_STALE_MS;
     }
 
+    function telemetryIsFresh() {
+        return Date.now() - lastTelemetry < PRINTER_HEARTBEAT_STALE_MS;
+    }
+
     function updatePrinterState() {
         let state;
         if (printIsActive()) {
@@ -393,6 +397,17 @@ $(function () {
 
     function sendPrinterHeartbeat() {
         if (!ctrlReady()) {
+            updatePrinterState();
+            return;
+        }
+        // State telemetry is stronger evidence of liveness than another M105.
+        // Avoid adding fixed-rate MQTT traffic while the printer is already
+        // publishing, especially during a print. Probing resumes once that
+        // passive traffic becomes stale.
+        if (telemetryIsFresh()) {
+            printerHeartbeatPending = false;
+            window.clearTimeout(printerHeartbeatTimeout);
+            printerHeartbeatTimeout = null;
             updatePrinterState();
             return;
         }

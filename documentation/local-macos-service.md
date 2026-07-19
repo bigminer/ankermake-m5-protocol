@@ -242,7 +242,8 @@ The local web UI adds the following features to upstream `ankerctl`:
 - Embedded WebRTC camera viewer.
 - Control tab showing state, progress, temperatures, speed and layer.
 - Object preview image when supplied by printer telemetry.
-- Fan, jog, home, temperature and raw G-code controls.
+- Fan, jog, temperature and raw G-code controls, plus a permanently disabled
+  Home placeholder that documents the standalone-homing hazard.
 
 Authentication behavior:
 
@@ -275,6 +276,10 @@ until the missing nozzle-probe preparation sequence is understood and tested.
 Jogging sends `G91`, the bounded `G1` move, and `G90` as three separate MQTT
 messages. Marlin treats a semicolon as the beginning of a comment, so combining
 those commands on one line would leave the printer in relative-coordinate mode.
+This describes the request format, not guaranteed motion: during supervised
+2026-07-19 tests, unhomed X/Y requests replied `echo:Home X/Y` and did not move.
+Earlier Z requests did move. The combined live jog fixture needs axis-specific
+revalidation and must not be cited as proof that X/Y moved.
 
 Pause and resume use the job-aware `PRINT_CONTROL` command with the active
 file path. Stop sends the captured minimal payload
@@ -330,8 +335,10 @@ G-code file keeps the old commands.
 3. `ankerctl` reads the file and opens a PPPP file-transfer session.
 4. The file is transferred to the M5C.
 5. The file-transfer end message asks the printer to start the job.
-6. MQTT telemetry reports job name, progress, remaining time, temperatures,
-   speed, and layer.
+6. While the printer remains associated with the hotspot and connected to the
+   broker, MQTT telemetry reports job name, progress, remaining time,
+   temperatures, speed, and layer. A physical print can continue if that MQTT
+   session drops; missing telemetry is not evidence that the job stopped.
 
 Successful log sequence:
 
@@ -554,13 +561,23 @@ together.
 
 2. Confirm the G-code contains the original `G28` block.
 3. Check the three expected upload log messages.
-4. Check PPPP state through `/api/ankerctl/status`.
-5. Power-cycle the printer if it does not reconnect after a failed command.
-6. Resend only after PPPP is `Running`.
+4. Check PPPP state through `/api/ankerctl/status`, but do not treat `Running`
+   as proof that the printer is present.
+5. Check the broker log for current printer PUBLISHes and check the hotspot
+   neighbor/lease. If the printer client disconnected, an `ankerctl` restart
+   will not force it back onto Wi-Fi.
+6. Improve the hotspot radio path or reassociate the printer. Power-cycle only
+   with a present operator and explicit authorization.
+7. Resend only after PPPP is `Running` **and** fresh printer MQTT notices are
+   visible.
 
 ### PPPP is `Starting` after a printer reboot
 
-The printer may need 30–60 seconds to rejoin the `M5C-Local` hotspot.
+The printer may need 30–60 seconds to rejoin the `M5C-Local` hotspot. That is a
+normal grace period, not a guarantee: on 2026-07-19 the printer remained absent
+with no ARP entry after its broker client disconnected. If the lease never
+answers, diagnose hotspot signal/association rather than waiting indefinitely
+or repeatedly restarting `ankerctl`.
 
 ```sh
 ping -c 2 192.168.2.2
@@ -583,6 +600,27 @@ Look for an upload that reaches `Sending file contents` without reaching
 The current service aborts a transfer when a 32 KiB block is not acknowledged
 within 15 seconds. Wait for PPPP to return to `Running`, then resend the
 complete file. Partial transfers are not resumable.
+
+### MQTT observation stops while the printer keeps working
+
+Do not assume the decoder or web service failed. Locate the boundary:
+
+1. Inspect the local Mosquitto log for the printer client and fresh
+   `/phone/maker/...` PUBLISHes.
+2. If printer PUBLISHes continue but `/ws/state` is stale, restart `ankerctl`
+   and recheck. This recovered the 2026-07-15 service-thread wedge.
+3. If the broker logged the printer client disconnecting and no PUBLISHes
+   follow, check the hotspot lease with ARP/ping and run the privileged
+   `deploy/local-broker/verify.sh`.
+4. If the local stack passes but the printer has no neighbor entry, treat the
+   direct Mac-hotspot ↔ printer radio link as the leading fault. An `ankerctl`
+   restart cannot recover a remote Wi-Fi client.
+
+On 2026-07-19 this exact second branch occurred: Mosquitto logged the printer
+client disconnecting with `Host is down`, the printer made no observed MQTT
+reconnect attempt, and a physically running print finished without further
+telemetry. Weak hotspot signal is `SUPPORTED` but needs a closer-placement live
+revalidation; a changed printer lease is not fully excluded.
 
 ### MQTT works but PPPP does not
 
@@ -627,7 +665,8 @@ Recovery:
 
 1. Do not send another print.
 2. Disable the experimental hook if enabled.
-3. Use the printer's physical power switch.
+3. Confirm an operator is physically present and explicitly authorizes a power
+   cycle, then use the printer's physical power switch.
 4. Leave it off for at least 10 seconds.
 5. Power it on.
 6. Verify both heater targets report 0°C.
@@ -769,8 +808,8 @@ the local changes.
 
 Before printing:
 
-- Printer is online and reachable.
-- PPPP and MQTT services are `Running`.
+- Printer has a current hotspot neighbor/reply and fresh broker PUBLISHes.
+- PPPP and MQTT services are `Running`; service state alone is insufficient.
 - Orca start G-code contains `G28`, not `G36`.
 - `ANKERCTL_PREPRINT_G36` is `false`.
 - Build plate and toolhead path are clear.

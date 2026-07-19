@@ -186,6 +186,16 @@ def _commands(page):
     )
 
 
+def _heartbeat_count(page):
+    return page.evaluate(
+        """
+        window.__wsSent.filter(
+            (item) => item.payload.requestId === "printer-heartbeat"
+        ).length
+        """
+    )
+
+
 def test_login_page_renders_and_accepts_valid_token(page, live_http_server):
     page.goto(live_http_server + "/")
 
@@ -357,6 +367,35 @@ def test_offline_printer_refuses_to_send_but_still_heartbeats(page, live_http_se
     # The heartbeat must still be exempt from the guard.
     page.wait_for_function(
         "window.__wsSent.some((item) => item.payload.requestId === 'printer-heartbeat')"
+    )
+
+
+def test_recent_telemetry_suppresses_redundant_heartbeats(page, live_http_server):
+    """Passive state traffic proves liveness without another MQTT command.
+
+    Once that traffic becomes stale, the heartbeat probe must resume so an idle
+    or disconnected printer can still be detected.
+    """
+    _login(page, live_http_server)
+    _make_printer_live(page)
+    page.evaluate("window.__wsSent.length = 0")
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state"))
+            .emit({nozzle: {current: 2000, target: 0}});
+        """
+    )
+
+    # The next scheduled probe is ten seconds away, while this telemetry stays
+    # fresh for fifteen seconds.
+    page.wait_for_timeout(10500)
+    assert _heartbeat_count(page) == 0
+
+    # At the following interval the telemetry is stale, so probing resumes.
+    page.wait_for_function(
+        "window.__wsSent.some((item) => item.payload.requestId === 'printer-heartbeat')",
+        timeout=12000,
     )
 
 

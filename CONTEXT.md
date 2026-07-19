@@ -10,6 +10,7 @@ _Avoid_: Command, control message
 
 **Protective action**:
 A Printer action whose sole purpose is to reduce immediate physical risk, such as stopping a print or turning heaters off. It remains permissible when the printer's current state cannot be confirmed.
+It still requires the current-session operator confirmation mandated by `CLAUDE.md`; "protective" does not bypass printer-safety authorization.
 _Avoid_: Emergency command, normal action
 
 **Action acceptance**:
@@ -37,7 +38,7 @@ A Printer action that requires an ordered series of operations, including any re
 _Avoid_: Macro, command sequence
 
 **Supervised validation**:
-Human-observed execution used to establish that changed Printer-action behavior produces the intended physical result. Once established for unchanged behavior, routine operation does not require physical attendance.
+Human-observed execution used to establish that changed Printer-action behavior produces the intended physical result. Validation does not waive the project's requirement for current-session operator presence before any later physical Printer action.
 _Avoid_: Attended action, permanent supervision
 
 **Printer snapshot**:

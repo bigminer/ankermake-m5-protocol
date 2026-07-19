@@ -6,14 +6,17 @@
   — it records what we know, what failed, and which conclusions were retracted.
   Append what you learn, with a status. Don't delete refuted entries.
 
-- **If the printer seems dead, restart `ankerctl` before diagnosing anything else.**
-  `launchctl kickstart -k gui/$(id -u)/com.ankerctl.webserver`
+- **If the printer seems dead, locate the silent layer before restarting
+  anything.** Check `/opt/ankerm5c/logs/mosquitto.out.log` first; `ankerctl`'s
+  status API reports its own threads, not printer presence.
 
-  Why: its service threads wedge and keep reporting `Running` while receiving
-  nothing. On 2026-07-15 this cost an hour chasing pf, dnsmasq, and mosquitto —
-  all healthy. The printer was publishing to the broker the entire time. Check
-  `/opt/ankerm5c/logs/mosquitto.out.log` to see what the printer is *actually*
-  doing; ankerctl's status API only reports its own threads, not the printer.
+  - If printer PUBLISHes are current but web state is stale, restart `ankerctl`:
+    `launchctl kickstart -k gui/$(id -u)/com.ankerctl.webserver`. This recovered
+    the confirmed 2026-07-15 service-thread wedge.
+  - If the broker logged the printer client disconnecting and PUBLISHes stopped,
+    an `ankerctl` restart cannot force the remote printer back onto Wi-Fi. Check
+    the hotspot neighbor/lease, signal path, and local-broker stack. This was the
+    confirmed 2026-07-19 observation gap.
 
 ## Printer safety
 

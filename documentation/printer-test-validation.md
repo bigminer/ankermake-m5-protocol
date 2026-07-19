@@ -62,14 +62,27 @@ Heating, fan, and terminal checks:
   -m "live_printer and not motion and not print_job and not g36"
 ```
 
-Motion checks:
+These tests prove only that the request path completes; the heating test does
+not currently perform an `M105` target assertion after each write. Manual
+2026-07-19 readback confirmed the low targets and later zero targets, but the
+fixture should add the same check. It cannot prove fan state: neither `M105` nor
+the broad status query exposes a fan field. The fan test sends 50% and then off
+without an independent assertion.
+
+Motion command-path exercise — **needs redesign/revalidation**:
 
 ```sh
 .venv/bin/python -m pytest tests/test_live_printer.py -v -m "motion"
 ```
 
-This test performs bounded 1 mm relative jogs only. It does not home any axis.
-Web full/Z homing is disabled after the 2026-07-13 incidents described below.
+This test sends bounded 1 mm relative requests only. It does not home any axis
+and currently asserts only that the websocket calls complete. On 2026-07-19,
+unhomed X/Y requests up to 50 mm produced printer replies containing
+`echo:Home X/Y` but no operator-observed movement. Z had moved in an earlier
+session, so one generic “small jogs” test now conflates different axis behavior.
+Do not use this test as proof of physical motion. Split it into axis-specific
+tests with position/readback evidence before running it again. Web full/Z
+homing remains disabled after the 2026-07-13 incidents described below.
 
 Print lifecycle fixture upload:
 
@@ -175,6 +188,10 @@ nozzle while job progress continued, recreating the cold-extrusion hazard. The
 operator powered the printer off. Stop now again uses the exact minimal payload
 that was captured and live-validated on 2026-07-10.
 
+`NEEDS LIVE REVALIDATION`: the restored minimal Stop payload has regression
+coverage but has not been exercised on another live job since the 2026-07-13
+failure. Do not describe current Stop behavior as live-verified.
+
 UNVERIFIED: whether the printer requires `userName` to match the job's
 original uploader. The one clean pause used a matching userName; a
 filePath-only retest was confounded by leftover pause state and inconclusive.
@@ -198,14 +215,21 @@ Remaining:
    at the printer.
 2. Confirm the webserver redirects unauthenticated `/` requests to `/login`.
 3. Log in with `ANKERCTL_TEST_TOKEN`.
-4. Confirm `/api/ankerctl/status` reports active services.
-5. Use the Control websocket to send `M105`.
-6. Set fan to 50%, then 0%.
-7. With heating allowed, set nozzle to 40C and bed to 35C, then cool both to
+4. Confirm `/api/ankerctl/status` reports active services, but do not treat
+   `Running` as printer reachability.
+5. Check the local broker log for recent printer PUBLISHes and confirm the
+   hotspot lease has a current neighbor/reply. A browser socket and an
+   `ankerctl` broker connection are insufficient.
+6. Use the Control websocket to send `M105`. A timeout is a failed observation,
+   not evidence that the physical printer stopped.
+7. Set fan to 50%, then 0%; record that fan state cannot be queried.
+8. With heating allowed, set nozzle to 40C and bed to 35C, then cool both to
    0C.
-8. With motion allowed, run the bounded 1 mm jog checks. Do not web-home.
-9. With print allowed, upload `tests/fixtures/tiny_safe.gcode`.
-10. With G36 enabled only for this supervised session, upload
+9. Do not run the combined motion test until it is redesigned as described
+   above. Do not web-home.
+10. With print allowed, upload `tests/fixtures/tiny_safe.gcode`; it is a
+    no-motion dwell/cooldown transport fixture, not a motion or extrusion test.
+11. With G36 enabled only for this supervised session, upload
     `tests/fixtures/g36_resolved.gcode` and verify invalid G36 fixtures are
     rejected before upload. Note: completion is currently expected to fail;
     see "G36 Validation Result" above.

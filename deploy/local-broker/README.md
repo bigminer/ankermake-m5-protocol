@@ -26,9 +26,9 @@ deny** on the printer's egress: once fully local, everything the printer needs
 rule passes `192.168.2.2 → 192.168.2.0/24` and drops everything else off-subnet.
 That is immune to IP rotation and also kills OTA and connectivity checks. The
 `anker_dns` NTP redirect rewrites the printer's `:123` to the local chrony
-*before* this filter runs, so time sync still works. PPPP camera stays on the
-LAN subnet, so it is unaffected (its cloud WAN relay is dropped, forcing
-direct-LAN P2P).
+*before* this filter runs, so time sync still works. PPPP file transfer/P2P
+stays on the LAN subnet, so it is unaffected by the off-subnet block. The M5C
+has no onboard camera.
 
 ## Prerequisites (already true on this Mac, verify before install)
 
@@ -83,7 +83,10 @@ sudo ./uninstall.sh          # stop daemons, flush anchors, keep the cert
 sudo ./uninstall.sh --purge  # also delete /opt/ankerm5c and the cert
 ```
 
-After uninstall the printer reconnects to Anker's cloud on its next DNS lookup.
+After uninstall, a printer that is still associated with Wi-Fi is expected to
+reconnect to Anker's cloud on a later DNS lookup. This is not guaranteed recovery
+for a printer that has already left the hotspot; confirm association and broker
+behavior instead of assuming the reconnect occurred.
 
 ## Troubleshooting
 
