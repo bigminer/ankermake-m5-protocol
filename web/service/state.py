@@ -36,7 +36,10 @@ def normalize(obj):
         out["state"] = state
 
     ct = obj.get("commandType")
-    if ct == 1001:  # print job status
+    if ct == 1000 and obj.get("subType") == 1:  # printer state event
+        if "value" in obj:
+            out["state"] = str(obj["value"])
+    elif ct == 1001:  # print job status
         p = {}
         if "name" in obj:
             p["name"] = obj["name"]

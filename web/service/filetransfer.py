@@ -7,7 +7,7 @@ from queue import Empty
 from ..lib.service import Service
 from .. import app
 
-from libflagship.pppp import P2PCmdType, Aabb, FileTransfer
+from libflagship.pppp import P2PCmdType, Aabb, FileTransfer, FileTransferReply
 from libflagship.ppppapi import FileUploadInfo, PPPPError
 
 FILE_TRANSFER_ACK_TIMEOUT = 15
@@ -27,6 +27,13 @@ class FileTransferService(Service):
                 f"Timed out waiting for file-transfer acknowledgement at offset {pos}"
             ) from exc
         log.debug(f"{self.name}: Aabb response: {resp}")
+        data = getattr(resp, "data", b"")
+        if len(data) != 1:
+            raise ValueError(f"Unexpected file-transfer reply: {data!r}")
+        result = FileTransferReply(data[0])
+        if result != FileTransferReply.OK:
+            raise PPPPError(result, f"File-transfer request failed: {result.name}")
+        return result
 
     def send_file(self, fd, user_name):
         try:

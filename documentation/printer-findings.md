@@ -424,6 +424,25 @@ inactive/cleared job and zero nozzle and bed targets. This is offline-tested but
 still `NEEDS LIVE REVALIDATION`; it does not explain why the 2026-07-20 global
 cancellation was acknowledged while the Orca stream continued.
 
+### Named-action live preflight follow-up (2026-07-20)
+
+With fresh operator clearance, validation mode was enabled only for this
+attended attempt. No Pause, Resume, or Stop action was ultimately sent because
+the synthetic no-motion uploads never produced an active job.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| The new snapshot initially failed to expose the printer's actual state | broker traffic was current and forwarded to `ankerctl`; snapshot cursors advanced, but `state` remained unknown because command type 1000/subType 1 stores state in `value`, a shape the normalizer omitted | root cause `CONFIRMED`; regression test and fix added |
+| Immediate unknown state after service restart is not itself a communication failure | `/ws/state` first returned cursor 0 with unknown facts; subsequent temperature notices advanced the cursor and a read-only 1027 query supplied state 0 | `CONFIRMED` |
+| The file-transfer service did not validate its one-byte acknowledgement result | code waited for an AABB reply but accepted every byte as success; tests now distinguish `OK`, `ERR_BUSY`, and malformed replies | defect `CONFIRMED`; fixed offline |
+| Synthetic zero-motion uploads cannot currently serve as a Pause/Resume/Stop fixture | simple dwell, firmware-backed `M109 R0`, and metadata-padded zero-displacement variants all received `OK` transfer acknowledgements and caused a beep, but raw status remained state 0 with no command type 1001 job notice | this fixture approach `INVALID-TEST`; why the communication module immediately completes/ignores it is `UNVERIFIED` |
+| The aborted validation left the printer inactive and cold | final raw status: state 0, no active job, nozzle target 0, bed target 0; validation mode was then disabled and the service restarted | session outcome `CONFIRMED` |
+
+Do not infer anything about the new Pause/Resume/Stop implementation from the
+synthetic attempts: there was never an active job to act on. The next live test
+requires separate authorization for a real slicer-generated job and must retain
+the physical-control fallback.
+
 **Lesson worth more than any single reading: when this printer has a hard problem,
 the answer has repeatedly been its own physical interface or the runbook — not a
 command we inferred.** The button beat every opcode we considered.

@@ -35,6 +35,13 @@ The current project work adds the issue #7 server-owned snapshot foundation and
 the issue #8/#11 named Stop/Pause/Resume action path. The action path is
 disabled by default and still needs supervised live validation.
 
+An attended follow-up found and fixed two additional preflight gaps: normalized
+state omitted the real 1000/subType 1 `value`, and PPPP file transfer did not
+check its one-byte acknowledgement result. Synthetic no-motion uploads received
+valid transfer acknowledgements but never became active jobs, so no named
+Pause/Resume/Stop action was sent. Final state was idle with both targets zero;
+the local validation-mode setting was returned to `false`.
+
 ## Mandatory safety rules
 
 Read `AGENTS.md` and `CLAUDE.md` before acting.

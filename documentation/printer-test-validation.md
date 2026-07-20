@@ -226,6 +226,14 @@ sending, never replays unresolved actions after restart, and reports
 `accepted`, `confirmed`, `rejected`, `superseded`, or `indeterminate`. It still
 `NEEDS LIVE REVALIDATION` before enabling normal UI use.
 
+The first attended attempt on 2026-07-20 stopped before any named action was
+sent. Several synthetic zero-motion files were accepted by the PPPP transfer
+and caused a printer beep, but the printer stayed in state 0 and emitted no
+1001 active-job notice. Those runs are `INVALID-TEST` for Pause/Resume/Stop.
+They did expose and fix two preflight defects: state normalization now handles
+1000/subType 1 `value`, and file transfer now rejects non-OK or malformed AABB
+acknowledgements. Validation mode was disabled again after the attempt.
+
 ## Expected Live Flow
 
 1. Confirm the bed is clear, filament path is safe, and an operator is present
