@@ -8,11 +8,8 @@ Last updated: 2026-07-20
 - Remote branch: `origin/local-control`
 - Upstream draft PR: [anselor/ankermake-m5-protocol#15](https://github.com/anselor/ankermake-m5-protocol/pull/15)
 - Parent design issue: [bigminer/ankermake-m5-protocol#6](https://github.com/bigminer/ankermake-m5-protocol/issues/6)
-- Latest pushed commit: `d1e7f0c` (`Restore minimal M5C stop payload`)
-- Local implementation history ends with `9297eb3` (`Validate printer state and
-  upload acknowledgements`) plus this handoff-only closeout commit. The final
-  branch is six commits ahead of `origin/local-control`; none of those six
-  commits has been pushed.
+- The completed implementation and session-closeout history is pushed to
+  `origin/local-control`; the existing upstream draft PR tracks that branch.
 - The macOS web service is running the local code. Named-action validation mode
   was returned to `false`; the new Pause/Resume/Stop path is not enabled for
   normal use.
@@ -64,8 +61,8 @@ validation, or printer action to resume automatically.
 | #16 — supervised Pause/Resume | Open; synthetic attempt was invalid and neither action was sent |
 
 Issues #10 and #12-#19 remain open future slices under #6. No claim is made
-that the whole parent design is complete. The GitHub comments explicitly note
-that the implementation commits are local and not pushed.
+that the whole parent design is complete. GitHub follow-up comments record that
+the completed session history was published to `origin/local-control`.
 
 ## Mandatory safety rules
 
