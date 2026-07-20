@@ -16,9 +16,13 @@ Last updated: 2026-07-20
 - The macOS web service is running the local code. Named-action validation mode
   was returned to `false`; the new Pause/Resume/Stop path is not enabled for
   normal use.
-- Final observed printer state for this session: state 0, no active job, nozzle
+- Final observed printer state before shutdown: state 0, no active job, nozzle
   target 0, bed target 0. The synthetic upload attempts caused beeps but no
-  active job, heating, homing, extrusion, or observed motion.
+  active job, heating, homing, extrusion, or observed motion. The operator then
+  powered the printer off. A subsequent 16-second read-only check saw zero new
+  printer broker publishes and no response to three pings. No disconnect line
+  arrived during that sample, so power-off is confirmed by the operator report
+  plus network absence, not by a captured disconnect event.
 - This session is closed with no active printer work. Always obtain new
   current-session operator confirmation before any later physical action.
 
