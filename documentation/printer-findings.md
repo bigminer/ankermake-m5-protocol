@@ -388,6 +388,42 @@ the recovery cannot be attributed to distance alone.
 | The Mac cold boot exposed a persistent Chrony PID-file collision | launchd crash-looped; `/opt/ankerm5c/chronyd.pid` named PID 309, which belonged to `storagekitd`; no process listened on UDP/123 | root cause `CONFIRMED` |
 | Moving Chrony's PID file to `/var/run` restores the installed NTP service | regression test failed on the persistent path and passed after the change; installed stack reported Chrony listening, runtime PID identified `chronyd`, and all verification checks passed | immediate fix `CONFIRMED`; another cold boot `NEEDS REVALIDATION` |
 
+### Same-room communications and live-print retest (2026-07-20)
+
+After fresh operator clearance, repeated no-motion communications remained
+healthy across multiple fan/heater scenarios, 30-60 second pauses, and an
+`ankerctl` restart. The operator heard the part fan, but could not distinguish
+the requested 25%, 50%, and 100% tiers.
+
+The operator then started a 43-layer Orca job while a passive monitor watched
+the actual hotspot path and broker/state streams without periodic manual
+`M105` queries. The job was physically aborted at layer 25 after the web Pause
+and Stop controls failed; this was not a completed-print test.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| Consecutive read/control communications survived long pauses and an `ankerctl` restart | repeated `M105` replies before/after restart and throughout 30-60s dwell scenarios; final targets read 0 | this run `CONFIRMED` |
+| Part-fan operation occurred during the tiered scenario | operator heard the fan | operation `CONFIRMED`; 25/50/100% speed accuracy `UNVERIFIED` |
+| Same-room passive observation remained continuous through the observed job | 1,099 normalized state messages, 308 notices, zero broker disconnects; 177/177 hotspot pings, 2.9ms average, 20.9ms maximum | through layer 25 `CONFIRMED`; full-job durability `UNVERIFIED` because job was aborted |
+| No explicit nozzle-probing telemetry was identified | during physically observed probing, decoded traffic included the normal notice families but no probe point/contact field | absence in this capture `CONFIRMED`; a hidden/undecoded field remains possible |
+| Web Pause did not pause this Orca-started job | six outbound publishes received six replies, but progress continued from layer 18 to 19 with no pause/park transition | this Orca job `CONFIRMED`; an uploader-identity mismatch is `SUPPORTED` but not yet live revalidated |
+| Minimal web Stop plus `M2024` still failed to cancel this Orca-started job | two more publishes/replies; heaters cooled immediately, but progress/elapsed increased and layers advanced to 25 | this Orca job `CONFIRMED`; control is unsafe pending fix |
+| Physical square-button long-press cleared the continuing job | telemetry reset 25/43 to 0; job frames ceased; toolhead moved back-left with Z raised; targets later read 0 | job clear `CONFIRMED`; calling the position "home" `UNVERIFIED` |
+
+This run disproves the claim that restoring the minimal Stop payload is enough
+for every upload origin. It had been live-validated in a different job context,
+but failed against this Orca-started job. A successful MQTT reply only proves
+message handling, not the required physical/job-state transition.
+
+The server-owned action implementation now keeps these contracts separate:
+Pause/Resume require the exact trusted upload identity, while Stop is always a
+global, identity-free protective action. Stop sends the minimal `1008/value=0`
+cancellation and `M2024` immediately, captures the `1008` acknowledgement for
+diagnosis, and only reports confirmation after fresh telemetry shows an
+inactive/cleared job and zero nozzle and bed targets. This is offline-tested but
+still `NEEDS LIVE REVALIDATION`; it does not explain why the 2026-07-20 global
+cancellation was acknowledged while the Orca stream continued.
+
 **Lesson worth more than any single reading: when this printer has a hard problem,
 the answer has repeatedly been its own physical interface or the runbook — not a
 command we inferred.** The button beat every opcode we considered.

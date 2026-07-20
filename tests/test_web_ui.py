@@ -7,8 +7,10 @@ from datetime import datetime
 from unittest import mock
 
 from cli.model import Account, Config, Printer
-from web import app, _require_token, ctrl_send_mqtt
+from web import app, _require_token, _state_updates, ctrl_send_mqtt, ctrl_submit_action
+from web.printer_actions import Pause
 from web.lib.service import RunState
+from web.printer_snapshot import PrinterSnapshots
 
 
 class FakeConfigManager:
@@ -97,6 +99,8 @@ class WebUiTestCase(unittest.TestCase):
         self.old_webcam_url = app.config.get("webcam_url")
         self.old_preprint_g36 = app.config.get("preprint_g36")
         self.old_svc = app.svc
+        self.old_printer_snapshots = getattr(app, "printer_snapshots", None)
+        self.old_printer_actions = getattr(app, "printer_actions", None)
 
         app.config["TESTING"] = True
         app.config["config"] = FakeConfigManager(make_config())
@@ -106,6 +110,7 @@ class WebUiTestCase(unittest.TestCase):
         app.config["webcam_url"] = ""
         app.config["preprint_g36"] = False
         app.config["slicer_token"] = ""
+        app.printer_snapshots = PrinterSnapshots(clock=lambda: 100.0)
 
     def tearDown(self):
         app.config["TESTING"] = self.old_testing
@@ -119,6 +124,8 @@ class WebUiTestCase(unittest.TestCase):
         app.config["webcam_url"] = self.old_webcam_url
         app.config["preprint_g36"] = self.old_preprint_g36
         app.svc = self.old_svc
+        app.printer_snapshots = self.old_printer_snapshots
+        app.printer_actions = self.old_printer_actions
 
     def test_root_without_token_is_available(self):
         app.config["access_token"] = ""
@@ -329,6 +336,56 @@ class WebUiTestCase(unittest.TestCase):
             result = _require_token()
 
         self.assertEqual(result[1], 401)
+
+    def test_ws_state_immediately_sends_the_server_owned_snapshot(self):
+        app.config["access_token"] = ""
+        app.printer_snapshots.observe(
+            "printer-0",
+            {"state": "printing", "print": {"name": "job.gcode"}},
+        )
+
+        @contextlib.contextmanager
+        def fake_borrow(name):
+            self.assertEqual(name, "mqttqueue")
+            yield object()
+
+        with mock.patch.object(app.svc, "borrow", fake_borrow):
+            payload = next(_state_updates())
+
+        self.assertEqual(payload["cursor"], 1)
+        self.assertEqual(payload["state"], "printing")
+        self.assertEqual(payload["print"]["name"], "job.gcode")
+        self.assertEqual(payload["facts"]["print.name"]["freshness"], "fresh")
+
+    def test_named_action_adapter_derives_printer_and_job_context_on_the_server(self):
+        app.config["printer_index"] = 0
+        submitted = []
+
+        class FakeActions:
+            def submit(self, request):
+                submitted.append(request)
+                return SimpleNamespace(to_dict=lambda: {
+                    "requestId": request.request_id,
+                    "status": "accepted",
+                })
+
+        from types import SimpleNamespace
+        app.printer_actions = FakeActions()
+        socket = FakeSocket([])
+
+        ctrl_submit_action(socket, {
+            "requestId": "pause-1",
+            "type": "pause",
+            "printerId": "attacker-chosen",
+            "userName": "attacker-chosen",
+            "filePath": "attacker-chosen.gcode",
+        })
+
+        self.assertEqual(len(submitted), 1)
+        self.assertEqual(submitted[0].request_id, "pause-1")
+        self.assertEqual(submitted[0].printer_id, "printer-0")
+        self.assertIsInstance(submitted[0].action, Pause)
+        self.assertEqual(json.loads(socket.sent[0])["action"]["status"], "accepted")
 
     def test_ws_ctrl_gcode_command_round_trip(self):
         app.config["access_token"] = ""

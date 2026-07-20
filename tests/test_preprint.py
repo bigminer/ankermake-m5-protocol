@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from flask import Flask
+
 from web import util
 
 
@@ -184,6 +186,28 @@ class PreprintTests(unittest.TestCase):
             ],
         )
         self.assertIsNone(filetransfer.data)
+
+    def test_orca_upload_identity_is_preserved_for_job_actions(self):
+        filetransfer = FakeFileTransfer()
+        remembered = []
+        snapshots = SimpleNamespace(
+            remember_job=lambda *args: remembered.append(args),
+        )
+        app = SimpleNamespace(
+            config={"preprint_g36": False, "printer_index": 0},
+            svc=FakeServiceManager(filetransfer),
+            printer_snapshots=snapshots,
+        )
+        flask = Flask(__name__)
+
+        with flask.test_request_context(headers={"User-Agent": "OrcaSlicer/2.3"}):
+            util.upload_file_to_printer(app, self.upload(b"G4 S1\n", "cube 1.gcode"))
+
+        self.assertEqual(filetransfer.user_name, "OrcaSlicer")
+        self.assertEqual(
+            remembered,
+            [("printer-0", "cube_1.gcode", "OrcaSlicer", "slicer_upload")],
+        )
 
 
 if __name__ == "__main__":

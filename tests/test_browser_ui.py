@@ -82,6 +82,7 @@ def configured_app():
         "printer_index": app.config.get("printer_index"),
         "webcam_url": app.config.get("webcam_url"),
         "preprint_g36": app.config.get("preprint_g36"),
+        "action_validation_mode": app.config.get("action_validation_mode"),
     }
 
     app.config["TESTING"] = True
@@ -92,6 +93,7 @@ def configured_app():
     app.config["printer_index"] = 0
     app.config["webcam_url"] = ""
     app.config["preprint_g36"] = False
+    app.config["action_validation_mode"] = False
 
     yield app
 
@@ -439,6 +441,128 @@ def test_printer_state_distinguishes_telemetry_from_control(page, live_http_serv
     page.wait_for_function(
         "document.querySelector('#control-printer-state').textContent === 'Ready'"
     )
+
+
+def test_state_socket_reconnects_from_the_last_server_cursor(page, live_http_server):
+    _login(page, live_http_server)
+    state = page.evaluate_handle(
+        "window.__wsInstances.find((ws) => ws.url.includes('/ws/state'))"
+    )
+
+    state.evaluate("ws => ws.emit({cursor: 7, facts: {}})")
+    state.evaluate("ws => ws.close()")
+
+    page.wait_for_function(
+        "window.__wsInstances.filter((ws) => ws.url.includes('/ws/state')).length >= 2"
+    )
+    urls = page.evaluate(
+        "window.__wsInstances.filter((ws) => ws.url.includes('/ws/state')).map((ws) => ws.url)"
+    )
+    assert urls[-1].endswith("/ws/state?cursor=7")
+
+
+def test_fresh_temperature_does_not_make_stale_job_controls_available(page, live_http_server):
+    _login(page, live_http_server)
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state")).emit({
+            cursor: 8,
+            state: "printing",
+            print: {name: "job.gcode"},
+            nozzle: {current: 22000},
+            facts: {
+                state: {value: "printing", freshness: "stale"},
+                "print.name": {value: "job.gcode", freshness: "stale"},
+                "nozzle.current": {value: 22000, freshness: "fresh"},
+            },
+        });
+        """
+    )
+
+    assert page.locator("#print-pause").is_disabled()
+    assert page.locator("#print-resume").is_disabled()
+
+
+def test_validation_mode_pause_uses_named_action_and_renders_pending_state(
+    page, live_http_server, configured_app
+):
+    configured_app.config["action_validation_mode"] = True
+    _login(page, live_http_server)
+    page.click("#control-tab")
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state")).emit({
+            cursor: 9,
+            state: "printing",
+            print: {name: "job.gcode", user_name: "OrcaSlicer"},
+            facts: {
+                state: {value: "printing", freshness: "fresh"},
+                "print.name": {value: "job.gcode", freshness: "fresh"},
+                "print.user_name": {value: "OrcaSlicer", freshness: "fresh"},
+            },
+        });
+        """
+    )
+
+    page.click("#print-pause")
+
+    frames = _ctrl_frames(page)
+    named = [frame["action"] for frame in frames if "action" in frame]
+    assert len(named) == 1
+    assert named[0]["type"] == "pause"
+    assert named[0]["requestId"]
+    assert "mqtt" not in frames[-1]
+    assert "awaiting" in page.locator("#print-action-status").inner_text().lower()
+
+
+def test_validation_mode_protective_stop_remains_available_with_stale_state(
+    page, live_http_server, configured_app
+):
+    configured_app.config["action_validation_mode"] = True
+    _login(page, live_http_server)
+    page.click("#control-tab")
+    page.on("dialog", lambda dialog: dialog.accept())
+
+    assert page.locator("#print-pause").is_disabled()
+    assert page.locator("#print-stop").is_enabled()
+
+    page.click("#print-stop")
+
+    frames = _ctrl_frames(page)
+    named = [frame["action"] for frame in frames if "action" in frame]
+    assert len(named) == 1
+    assert named[0]["type"] == "stop"
+
+
+def test_validation_mode_renders_pause_superseded_by_protective_stop(
+    page, live_http_server, configured_app
+):
+    configured_app.config["action_validation_mode"] = True
+    _login(page, live_http_server)
+    page.click("#control-tab")
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state")).emit({
+            cursor: 10,
+            actions: {
+                "pause-1": {
+                    requestId: "pause-1",
+                    action: "pause",
+                    status: "superseded",
+                    reason: "protective_stop_submitted",
+                    updatedAt: 10,
+                },
+            },
+            facts: {},
+        });
+        """
+    )
+
+    status = page.locator("#print-action-status").inner_text().lower()
+    assert "superseded" in status
+    assert "stop" in status
 
 
 def test_attended_filament_and_z_controls_send_bounded_gcode(page, live_http_server):

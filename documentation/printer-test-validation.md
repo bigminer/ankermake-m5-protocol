@@ -188,9 +188,20 @@ nozzle while job progress continued, recreating the cold-extrusion hazard. The
 operator powered the printer off. Stop now again uses the exact minimal payload
 that was captured and live-validated on 2026-07-10.
 
-`NEEDS LIVE REVALIDATION`: the restored minimal Stop payload has regression
-coverage but has not been exercised on another live job since the 2026-07-13
-failure. Do not describe current Stop behavior as live-verified.
+Live revalidation on 2026-07-20 **failed for an Orca-started job**. The deployed
+UI sent the minimal `PRINT_CONTROL value=0` payload plus `M2024` and received two
+replies. `M2024` cooled both heaters, but print progress continued and layers
+advanced from 21 through 25 until the operator used a physical square-button
+long-press. Therefore the restored payload must not be described as generally
+live-verified or safe. The earlier successful validation and this failure used
+different job origins/identity contexts.
+
+Pause failed in the same Orca run: publishes and replies were observed, but the
+job advanced from layer 18 to 19 with no pause/park transition. This strengthens
+the hypothesis that Pause used the wrong uploader identity, but does not prove
+it until the new trusted upload-identity path is exercised live. This identity
+requirement applies to Pause/Resume only. Stop remains a global, identity-free
+protective action; adding job identity to Stop is a known regression.
 
 UNVERIFIED: whether the printer requires `userName` to match the job's
 original uploader. The one clean pause used a matching userName; a
@@ -202,12 +213,18 @@ check `M114` for the `X-10 Y200` park.
 
 Remaining:
 
-1. Resolve the `userName`-match question above.
-2. Automate the supervised live pause/resume/stop test using a fast-move
-   fixture (e.g. regenerate `stream_stop_test.gcode`); assert the pause park
-   via `M114` and state via 1000/subType 1.
-3. Surface command delivery in the UI: Stop must confirm the printer's
-   reply, and a dead `/ws/ctrl` socket must be unmistakable.
+1. Revalidate Pause/Resume using the uploader identity recorded by the server.
+2. Revalidate global Stop independently; do not add identity fields to its
+   payload. Capture the exact `1008` reply value and all subsequent state.
+3. Use a supervised no-extrusion/no-homing fixture. Assert Pause/Resume against
+   the same job and Stop against job-cleared, inactive-state, and zero-target
+   telemetry. A reply without those transitions is not success.
+
+The server-owned action path implements these gates offline. It is disabled
+unless `ANKERCTL_ACTION_VALIDATION_MODE=true`, journals acceptance before
+sending, never replays unresolved actions after restart, and reports
+`accepted`, `confirmed`, `rejected`, `superseded`, or `indeterminate`. It still
+`NEEDS LIVE REVALIDATION` before enabling normal UI use.
 
 ## Expected Live Flow
 

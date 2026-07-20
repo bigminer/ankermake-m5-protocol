@@ -45,6 +45,15 @@ from user_agents import parse as user_agent_parse
 from libflagship import ROOT_DIR
 
 from web.lib.service import ServiceManager, RunState, ServiceStoppedError
+from web.printer_snapshot import CursorExpired, PrinterSnapshots, Watch
+from web.printer_actions import (
+    ActionRequest,
+    MqttActionProtocol,
+    Pause,
+    PrinterActions,
+    Resume,
+    Stop,
+)
 
 import web.config
 import web.platform
@@ -92,8 +101,20 @@ app.config["preprint_g36"] = os.environ.get(
 app.config["preprint_command_timeout"] = int(
     os.environ.get("ANKERCTL_PREPRINT_COMMAND_TIMEOUT", "300")
 )
+app.config["action_validation_mode"] = os.environ.get(
+    "ANKERCTL_ACTION_VALIDATION_MODE", ""
+).lower() in {"1", "true", "yes", "on"}
+app.config["action_confirmation_timeout"] = float(
+    os.environ.get("ANKERCTL_ACTION_CONFIRMATION_TIMEOUT", "30")
+)
+app.config["action_journal_path"] = os.environ.get(
+    "ANKERCTL_ACTION_JOURNAL_PATH",
+    os.path.join(os.path.expanduser("~"), ".local", "state", "ankerctl", "actions.jsonl"),
+)
 
 app.svc = ServiceManager()
+app.printer_snapshots = PrinterSnapshots()
+app.printer_actions = None
 
 sock = Sock(app)
 
@@ -292,6 +313,27 @@ def ctrl_send_mqtt(sock, msg):
         sock.send(json.dumps(response))
 
 
+def ctrl_submit_action(sock, message):
+    """Translate a trusted browser action name; ignore caller-supplied context."""
+    if app.printer_actions is None:
+        sock.send(json.dumps({"actionError": "printer_actions_unavailable"}))
+        return
+
+    action_type = str(message.get("type", "")).lower()
+    action = {"pause": Pause, "resume": Resume, "stop": Stop}.get(action_type)
+    request_id = str(message.get("requestId", "")).strip()
+    if action is None or not request_id:
+        sock.send(json.dumps({"actionError": "invalid_action_request"}))
+        return
+
+    outcome = app.printer_actions.submit(ActionRequest(
+        request_id=request_id,
+        printer_id=f"printer-{app.config['printer_index']}",
+        action=action(),
+    ))
+    sock.send(json.dumps({"action": outcome.to_dict()}))
+
+
 @sock.route("/ws/mqtt")
 def mqtt(sock):
     """
@@ -317,10 +359,25 @@ def state(sock):
         return
     if not app.config["login"]:
         return
-    for data in app.svc.stream("mqttqueue"):
-        norm = web.service.state.normalize(data)
-        if norm:
-            sock.send(json.dumps(norm))
+    cursor = request.args.get("cursor", type=int)
+    try:
+        for snapshot in _state_updates(cursor):
+            sock.send(json.dumps(snapshot))
+    except CursorExpired as error:
+        sock.send(json.dumps({
+            "snapshotError": "cursor_expired",
+            "oldestCursor": error.oldest_cursor,
+            "currentCursor": error.current_cursor,
+        }))
+
+
+def _state_updates(cursor=None):
+    """Yield selected-printer snapshots while keeping its MQTT source active."""
+    printer_id = f"printer-{app.config['printer_index']}"
+    watcher = app.printer_snapshots.watch(Watch(printer_id, cursor))
+    with app.svc.borrow("mqttqueue"):
+        for snapshot in watcher:
+            yield snapshot.to_dict()
 
 
 @sock.route("/ws/video")
@@ -388,6 +445,9 @@ def ctrl(sock):
 
         if "mqtt" in msg:
             ctrl_send_mqtt(sock, msg)
+
+        if "action" in msg:
+            ctrl_submit_action(sock, msg["action"])
 
         if "light" in msg:
             with app.svc.borrow("videoqueue") as vq:
@@ -465,6 +525,7 @@ def app_root():
             current_country=country,
             webcam_url=webcam_url,
             slicer_token_configured=bool(app.config["slicer_token"]),
+            action_validation_mode=bool(app.config["action_validation_mode"]),
             printer=printer
         )
 
@@ -738,11 +799,22 @@ def app_api_ankerctl_status() -> dict:
 
 
 def register_services(app):
+    with app.config["config"].open() as cfg:
+        for index, _printer in enumerate(cfg.printers):
+            app.printer_snapshots.ensure(f"printer-{index}")
     app.svc.register("pppp", web.service.pppp.PPPPService())
     if app.config["video_supported"]:
         app.svc.register("videoqueue", web.service.video.VideoQueue())
     app.svc.register("mqttqueue", web.service.mqtt.MqttQueue())
     app.svc.register("filetransfer", web.service.filetransfer.FileTransferService())
+    if app.printer_actions is None:
+        app.printer_actions = PrinterActions(
+            snapshots=app.printer_snapshots,
+            protocol=MqttActionProtocol(app),
+            journal_path=app.config["action_journal_path"],
+            validation_mode=app.config["action_validation_mode"],
+            confirmation_timeout=app.config["action_confirmation_timeout"],
+        )
 
 
 def webserver(config, printer_index, host, port, insecure=False, **kwargs):

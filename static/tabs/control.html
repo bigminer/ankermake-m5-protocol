@@ -3,6 +3,7 @@
     id="control"
     role="tabpanel"
     aria-labelledby="control-tab"
+    data-action-validation-mode="{{ 'true' if action_validation_mode else 'false' }}"
 >
     <div class="container fullscreen-emulate control-panel">
         <!-- Status strip -->
@@ -89,6 +90,7 @@
                             </button>
                         </div>
                     </div>
+                    <p class="small mb-0 mt-3" id="print-action-status" aria-live="polite"></p>
                     <p class="small text-body-secondary mb-0 mt-3">Available while a print is active.</p>
                 </div>
             </div>

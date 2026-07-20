@@ -158,6 +158,9 @@ Environment variables:
 | `ANKERCTL_MAX_UPLOAD_BYTES` | Largest accepted slicer upload | Defaults to 512 MiB; lower it if your profiles allow |
 | `ANKERCTL_PREPRINT_G36` | Experimental pre-upload preparation hook | Must remain `false` |
 | `ANKERCTL_PREPRINT_COMMAND_TIMEOUT` | Experimental hook timeout | Present but unused while hook is disabled |
+| `ANKERCTL_ACTION_VALIDATION_MODE` | Enables named Pause/Resume/Stop actions | Must remain `false` outside an attended validation |
+| `ANKERCTL_ACTION_CONFIRMATION_TIMEOUT` | Time allowed for telemetry confirmation | Defaults to 30 seconds |
+| `ANKERCTL_ACTION_JOURNAL_PATH` | Durable action-outcome journal | Optional; defaults to the user's local state directory |
 | `ANKERCTL_WEBCAM_URL` | Optional environment-level webcam URL | Not required when URL is saved in `default.json` |
 
 Generate new secrets rather than reusing documented examples:
@@ -283,11 +286,21 @@ revalidation and must not be cited as proof that X/Y moved.
 
 Pause and resume use the job-aware `PRINT_CONTROL` command with the active
 file path. Stop sends the captured minimal payload
-`{"commandType": 1008, "value": 0}` plus `M2024`: the former cancels the
-communication-module job while the latter clears motion already buffered by
-the MCU. Do not add Pause/Resume's `userName` or `filePath` fields to Stop; a
-2026-07-13 regression did so and failed to cancel a live job while `M2024`
-cooled the nozzle. The physical power switch remains the safety backstop.
+`{"commandType": 1008, "value": 0}` plus `M2024`: the former is intended to
+cancel the communication-module job while the latter clears motion already
+buffered by the MCU. Do not add Pause/Resume's `userName` or `filePath` fields
+to Stop; a 2026-07-13 regression did so and failed to cancel a live job while
+`M2024` cooled the nozzle.
+
+The restored minimal Stop payload also failed against an Orca-started job on
+2026-07-20: both messages received replies and the heaters cooled, but progress
+and layer telemetry continued until the operator used the physical button.
+Pause failed on that job as well. Pause/Resume now require the trusted identity
+recorded at upload. Stop deliberately does not: it remains a global protective
+override with the minimal `1008/value=0` payload. Treat both controls as unsafe
+for live use until the new server-owned confirmation path is revalidated. A
+reply is not proof of a pause/stop transition; the physical controls remain the
+safety backstop.
 
 ## OrcaSlicer configuration
 

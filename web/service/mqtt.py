@@ -24,7 +24,15 @@ class MqttQueue(Service):
             log.debug(enhex(msg.payload[:]))
 
             for obj in body:
+                from .state import normalize
+                normalized = normalize(obj)
+                if normalized:
+                    printer_id = f"printer-{app.config['printer_index']}"
+                    app.printer_snapshots.observe(printer_id, normalized)
                 self.notify(obj)
+        app.printer_snapshots.tick()
+        if app.printer_actions is not None:
+            app.printer_actions.tick()
 
     def worker_stop(self):
         try:

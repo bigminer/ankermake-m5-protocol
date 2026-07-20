@@ -7,6 +7,7 @@ from flask import flash, redirect, request
 
 import cli.mqtt
 from libflagship.mqtt import MqttMsgType
+from libflagship.ppppapi import FileUploadInfo
 
 
 _PREPRINT_LOCK = Lock()
@@ -181,6 +182,7 @@ def _run_preprint_upload(app, upload, user_name, bed_temp, nozzle_temp):
 
         with app.svc.borrow("filetransfer") as filetransfer:
             filetransfer.send_file(upload, user_name)
+        _remember_upload_identity(app, upload, user_name)
         log.info("Pre-print hook: completed routine and uploaded %r", upload.filename)
     except Exception:
         log.exception("Pre-print hook: failed for %r", upload.filename)
@@ -214,3 +216,18 @@ def upload_file_to_printer(app, file):
 
     with app.svc.borrow("filetransfer") as ft:
         ft.send_file(file, user_name)
+    _remember_upload_identity(app, file, user_name)
+
+
+def _remember_upload_identity(app, file, user_name):
+    snapshots = getattr(app, "printer_snapshots", None)
+    if snapshots is None:
+        return
+    file_name = FileUploadInfo.sanitize_filename(file.filename.rsplit("/", 1)[-1])
+    origin = "slicer_upload" if "slicer" in user_name.lower() else "pppp_upload"
+    snapshots.remember_job(
+        f"printer-{app.config['printer_index']}",
+        file_name,
+        user_name,
+        origin,
+    )

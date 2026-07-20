@@ -334,7 +334,8 @@ $(function () {
         }
 
         connect() {
-            var ws = this.ws = new WebSocket(this.url);
+            const url = typeof this.url === "function" ? this.url() : this.url;
+            var ws = this.ws = new WebSocket(url);
             if (this.binary)
                 ws.binaryType = "arraybuffer";
             ws.addEventListener("open", this._open.bind(this));
@@ -357,6 +358,10 @@ $(function () {
     let requestedBedTarget = null;
     let lastPrinterHeartbeat = 0;
     let lastTelemetry = 0;
+    let stateCursor = null;
+    let snapshotFacts = null;
+    const actionValidationMode = document.getElementById("control")
+        ?.dataset.actionValidationMode === "true";
     let printerHeartbeatPending = false;
     let printerHeartbeatTimer = null;
     let printerHeartbeatTimeout = null;
@@ -369,10 +374,28 @@ $(function () {
         return /print|paus|resume/i.test(printerState) || currentPrintFile !== "";
     }
 
+    function factIsFresh(path) {
+        return snapshotFacts !== null
+            && snapshotFacts[path]
+            && snapshotFacts[path].freshness === "fresh";
+    }
+
+    function jobFactsAreFresh() {
+        // Compatibility mode for older /ws/state producers. The server-owned
+        // snapshot always supplies facts and takes over as soon as it appears.
+        if (snapshotFacts === null) {
+            return printerIsLive();
+        }
+        return factIsFresh("state") && factIsFresh("print.name");
+    }
+
     // The printer is only considered live if it has said something recently.  An
     // open control socket proves we reached ankerctl, not that ankerctl reached
     // the printer: its service threads can wedge while still reporting Running.
     function printerIsLive() {
+        if (snapshotFacts !== null) {
+            return Object.values(snapshotFacts).some((fact) => fact.freshness === "fresh");
+        }
         return Date.now() - lastPrinterHeartbeat < PRINTER_HEARTBEAT_STALE_MS
             || Date.now() - lastTelemetry < PRINTER_HEARTBEAT_STALE_MS;
     }
@@ -449,7 +472,12 @@ $(function () {
         // being open: a wedged ankerctl accepts commands and drops them silently.
         const controlReady = ctrlReady() && printerIsLive();
         const printActive = printIsActive();
-        $("#print-pause, #print-resume, #print-stop").prop("disabled", !controlReady || !printActive);
+        $("#print-pause, #print-resume").prop(
+            "disabled", !controlReady || !printActive || !jobFactsAreFresh());
+        $("#print-stop").prop(
+            "disabled",
+            actionValidationMode ? !ctrlReady() : (!controlReady || !printActive),
+        );
         const canAdjustZ = controlReady && !printActive;
         const canMoveFilament = canAdjustZ && currentNozzleTemp >= 17000;
         // Full/Z homing is disabled independently of connection state. Both
@@ -461,12 +489,39 @@ $(function () {
         $("#filament-retract, #filament-extrude").prop("disabled", !canMoveFilament);
     }
 
+    function renderActionOutcome(action) {
+        if (!action) {
+            return;
+        }
+        const label = action.action.charAt(0).toUpperCase() + action.action.slice(1);
+        const status = $("#print-action-status");
+        if (action.status === "accepted") {
+            status.attr("class", "small text-warning mb-0 mt-3")
+                .text(`${label} accepted — awaiting printer confirmation.`);
+        } else if (action.status === "confirmed") {
+            status.attr("class", "small text-success mb-0 mt-3")
+                .text(`${label} confirmed by printer telemetry.`);
+        } else if (action.status === "indeterminate") {
+            status.attr("class", "small text-danger mb-0 mt-3")
+                .text(`${label} could not be confirmed. Use the printer's physical controls; remove power if motion remains hazardous.`);
+        } else if (action.status === "superseded") {
+            status.attr("class", "small text-warning mb-0 mt-3")
+                .text(`${label} was superseded by the protective Stop request.`);
+        } else if (action.status === "rejected") {
+            status.attr("class", "small text-danger mb-0 mt-3")
+                .text(`${label} was not sent: ${action.reason}.`);
+        }
+    }
+
     // Telemetry socket: consumes the normalized printer-state schema from
     // /ws/state (nozzle/bed/print/speed/state) instead of raw MQTT commandType
     // messages. The raw feed still exists on /ws/mqtt for debugging.
     sockets.mqtt = new AutoWebSocket({
         name: "state socket",
-        url: `${location.protocol.replace('http','ws')}//${location.host}/ws/state`,
+        url: function () {
+            const base = `${location.protocol.replace('http','ws')}//${location.host}/ws/state`;
+            return stateCursor === null ? base : `${base}?cursor=${stateCursor}`;
+        },
 
         opened: function (event) {
             setDisabled(["#set-nozzle-temp", "#set-bed-temp"], false);
@@ -474,6 +529,24 @@ $(function () {
 
         message: function (ev) {
             const data = JSON.parse(ev.data);
+            if (data.snapshotError === "cursor_expired") {
+                stateCursor = null;
+                sockets.mqtt.ws.close();
+                return;
+            }
+            if (Number.isInteger(data.cursor)) {
+                stateCursor = data.cursor;
+            }
+            if (data.facts) {
+                snapshotFacts = data.facts;
+            }
+            if (data.actions) {
+                const actions = Object.values(data.actions);
+                if (actions.length) {
+                    actions.sort((a, b) => a.updatedAt - b.updatedAt);
+                    renderActionOutcome(actions[actions.length - 1]);
+                }
+            }
             lastTelemetry = Date.now();
             updatePrinterState();
 
@@ -579,6 +652,7 @@ $(function () {
             requestedNozzleTarget = null;
             requestedBedTarget = null;
             lastTelemetry = 0;
+            snapshotFacts = null;
             updatePrinterState();
             setDisabled(["#set-nozzle-temp", "#set-bed-temp"], true);
             updateAttendedControls();
@@ -642,6 +716,15 @@ $(function () {
             if (data.ankerctlError) {
                 flash_message(data.ankerctlError, "warning");
                 appendGcodeLog(`< Blocked: ${data.ankerctlError}`);
+                return;
+            }
+            if (data.actionError) {
+                $("#print-action-status").attr("class", "small text-danger mb-0 mt-3")
+                    .text(`Action was not accepted: ${data.actionError}.`);
+                return;
+            }
+            if (data.action) {
+                renderActionOutcome(data.action);
                 return;
             }
             if (data.requestId === HEARTBEAT_REQUEST_ID) {
@@ -926,6 +1009,19 @@ $(function () {
         sockets.ctrl.ws.send(JSON.stringify(message));
     }
 
+    function sendNamedAction(type) {
+        if (!ctrlReady()) {
+            flash_message("Control socket not connected", "warning");
+            return;
+        }
+        const requestId = (window.crypto && window.crypto.randomUUID)
+            ? window.crypto.randomUUID()
+            : `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        sockets.ctrl.ws.send(JSON.stringify({action: {requestId: requestId, type: type}}));
+        $("#print-action-status").attr("class", "small text-warning mb-0 mt-3")
+            .text(`${type.charAt(0).toUpperCase() + type.slice(1)} submitted — awaiting server acceptance.`);
+    }
+
     // Pause/resume identify the running job by name. Stop is deliberately not
     // routed through this helper: its captured and live-validated payload is
     // the minimal {commandType: PRINT_CONTROL, value: 0} form.
@@ -970,11 +1066,19 @@ $(function () {
     // the M-code path does not act on an onboard job whose stream the
     // communication module owns.
     $("#print-pause").on("click", function () {
-        sendJobControl(1);
+        if (actionValidationMode) {
+            sendNamedAction("pause");
+        } else {
+            sendJobControl(1);
+        }
         return false;
     });
     $("#print-resume").on("click", function () {
-        sendJobControl(2);
+        if (actionValidationMode) {
+            sendNamedAction("resume");
+        } else {
+            sendJobControl(2);
+        }
         return false;
     });
     // Stop needs both paths: PRINT_CONTROL value=0 cancels the job on the
@@ -982,11 +1086,15 @@ $(function () {
     // the MCU queue and stops motion already buffered.
     $("#print-stop").on("click", function () {
         if (window.confirm("Stop the current print?")) {
-            sendMqtt({
-                commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL,
-                value: 0,
-            });
-            sendGcode("M2024");
+            if (actionValidationMode) {
+                sendNamedAction("stop");
+            } else {
+                sendMqtt({
+                    commandType: MqttMsgType.ZZ_MQTT_CMD_PRINT_CONTROL,
+                    value: 0,
+                });
+                sendGcode("M2024");
+            }
         }
         return false;
     });

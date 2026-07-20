@@ -1,6 +1,6 @@
 # Session handoff
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Current repository state
 
@@ -9,15 +9,17 @@ Last updated: 2026-07-19
 - Upstream draft PR: [anselor/ankermake-m5-protocol#15](https://github.com/anselor/ankermake-m5-protocol/pull/15)
 - Incident tracker: [bigminer/ankermake-m5-protocol#5](https://github.com/bigminer/ankermake-m5-protocol/issues/5)
 - Latest pushed commit: `d1e7f0c` (`Restore minimal M5C stop payload`)
-- Local `HEAD`: `3e63450` (`Reduce redundant printer heartbeats and document
-  MQTT gap`), two commits ahead of `origin/local-control`.
+- Local `HEAD`: this handoff's `Add server-owned printer snapshots and actions`
+  commit, four commits ahead of `origin/local-control`.
 - The macOS web service was restarted after `d1e7f0c`; the Home lockout and
-  corrected Stop payload are deployed.
-- Last operator report: the supervised Orca job finished normally. The printer
-  had been powered on, but afterward it disappeared from the Mac-hosted hotspot
-  and stopped answering MQTT, ICMP, and known local service probes. Its current
-  power and physical state were not reconfirmed after that observation. Always
-  ask before a new physical action.
+  current minimal Stop payload are deployed. The payload failed against the
+  latest Orca-started job, as documented below.
+- Last operator report: a second supervised Orca job was physically stopped at
+  layer 25/43 after web Pause and Stop failed. A physical square-button
+  long-press cleared the job and moved the toolhead to the back-left with Z
+  raised. Do not call that location "home"; the operator was uncertain. Both
+  heater targets were 0 and the printer was cooling. Always ask before a new
+  physical action.
 
 The worktree contains local user state that must not be modified, staged, or
 committed without explicit instruction:
@@ -25,18 +27,13 @@ committed without explicit instruction:
 - `.env` is modified and contains local configuration.
 - `.playwright-mcp/` is an untracked user/browser artifact directory.
 
-The worktree also contains deliberate, uncommitted project changes from the
-2026-07-20 cold-boot follow-up:
+The Chrony PID-file repair and its documentation were committed in `261f8ce`.
+Do not stage `.env` or `.playwright-mcp/`. Any documentation changes below are
+the intended scope of the current live follow-up.
 
-- `deploy/local-broker/chrony.conf` and `deploy/local-broker/README.md` — use a
-  boot-cleared Chrony runtime PID file and document why.
-- `tests/test_local_broker_config.py` — regression coverage for the persistent
-  PID-file failure.
-- `HANDOFF.md` and `documentation/printer-findings.md` — corrected network-test
-  evidence and cold-boot findings.
-
-Do not stage `.env` or `.playwright-mcp/`. The project files listed above are the
-intended scope if this follow-up is committed.
+The current project work adds the issue #7 server-owned snapshot foundation and
+the issue #8/#11 named Stop/Pause/Resume action path. The action path is
+disabled by default and still needs supervised live validation.
 
 ## Mandatory safety rules
 
@@ -290,6 +287,68 @@ cold boot before boot persistence can be called `CONFIRMED`. The observation-gap
 mitigation still needs a small print monitored from start to finish in the new
 same-room placement.
 
+## 2026-07-20 same-room live-print retest
+
+### No-motion communications and heater/fan scenarios
+
+With fresh operator clearance, repeated `M105` reads succeeded before and after
+an `ankerctl` restart. The supervised sequence exercised 25%, 50%, and 100%
+part-fan requests, 40 C nozzle and 35 C bed targets, 30-60 second idle periods,
+and a service restart while targets remained active. Consecutive temperature
+reads continued to reply. The final `M107`, `M104 S0`, and `M140 S0` requests
+left both heater targets at 0. The operator heard the fan running but could not
+distinguish the requested speed tiers, so fan operation is physically confirmed
+for the sequence while speed accuracy remains unverified.
+
+### Passive Orca-job monitor
+
+The operator then started a 43-layer job from Orca. A persistent passive monitor
+watched normalized state, raw broker traffic, disconnects, and a five-second
+ping over the actual `bridge100` hotspot path. It deliberately sent no periodic
+`M105` query. The monitor observed preheat, the printer's calibration phase,
+and printing through layer 25. The operator physically observed nozzle probing;
+the raw notice types seen during calibration contained no explicit probe-point
+or contact field, so only the phase correlation and physical observation are
+confirmed.
+
+The earlier observation gap did not recur during this run. At monitor shutdown:
+
+- 1,099 normalized state messages and 308 printer notices had arrived;
+- the printer had zero observed broker disconnects;
+- hotspot ping was 177/177 with 2.9 ms average and 20.9 ms maximum;
+- updates remained current at roughly three-second cadence.
+
+This is strong evidence that the same-room/hotspot setup can sustain observation,
+but it is not a completed-print validation: the operator physically aborted the
+job at layer 25 after the web-control failures below. Moving the Mac and rebooting
+it remain confounded, so do not attribute recovery to signal strength alone.
+
+### Pause and Stop failed on the Orca-started job
+
+The web Pause attempts produced six outbound MQTT publishes and six printer
+replies, but progress continued and the printer advanced from layer 18 to 19.
+No pause/park state transition appeared.
+
+The web Stop produced two additional publishes and replies, matching the UI's
+minimal `PRINT_CONTROL value=0` plus `M2024` pair. The nozzle immediately cooled
+from 220 C and the bed began cooling, proving the MCU-side stop/heater shutdown
+acted, but the communication-module job continued: progress and elapsed time
+increased and layers advanced through 25. This recreates the cold-extrusion
+hazard even with the restored minimal Stop payload when the job originates from
+Orca. A command reply is therefore not proof of a successful job transition.
+
+The operator then held the physical square button. Telemetry reset from layer
+25/43 to layer 0, job/progress frames ceased, and the toolhead moved to the
+back-left with Z raised. That position is a confirmed physical observation but
+is not established as firmware home. A later passive read showed nozzle 45 C
+to 42 C with target 0 and bed about 48 C with target 0.
+
+Pause/Resume now use the trusted identity recorded when the server accepts an
+Orca upload. Stop remains deliberately global and identity-free: it must cancel
+whatever job is active, regardless of origin. Treat both paths as unvalidated
+for live use until the new server-owned confirmation path passes a supervised
+fixture. The physical printer controls remain the tested recovery path.
+
 ## Homing incident and current containment
 
 Two standalone web homing approaches were unsafe on this M5C:
@@ -361,8 +420,8 @@ A regression routed Stop through the Pause/Resume helper and added
 - The operator powered the printer off.
 
 Commit `d1e7f0c` restores the exact minimal Stop payload plus `M2024`, updates
-browser regression coverage, and records the incident. It is deployed but has
-not yet been revalidated on a live print.
+browser regression coverage, and records the incident. The 2026-07-20 retest
+documented above showed that it still fails to cancel an Orca-started job.
 
 ## Jog and live-fixture corrections
 
@@ -407,14 +466,14 @@ Track the work in
    published firmware before designing a standalone workflow.
 3. Accept that safe standalone Home may not be exposed by production firmware;
    if so, permanently omit the feature.
-4. Determine Pause/Resume job-identity requirements for each upload origin.
-5. Add UI acknowledgement/state-transition handling. MQTT delivery alone must
-   not be presented as physical success.
-6. Revalidate Stop only with a fresh operator confirmation and a supervised,
-   no-extrusion/no-homing fixture. Verify that progress stops and printer state
-   leaves printing; if it does not, instruct immediate physical power-off.
-7. Update the GitHub issue with live evidence and only then adjust confidence
-   messaging or control availability.
+4. Revalidate Pause/Resume using the exact server-recorded upload identity.
+5. Revalidate global Stop separately and capture its exact `1008` reply. Never
+   add Pause/Resume identity fields to Stop.
+6. Use a no-extrusion/no-homing fixture and require telemetry confirmation:
+   Pause/Resume must transition the same job; Stop must clear the job, leave an
+   inactive state, and show zero nozzle/bed targets.
+7. Keep the named action path disabled outside supervised validation until
+   those checks pass; update the GitHub issue before restoring confidence copy.
 
 ## Useful commands
 
