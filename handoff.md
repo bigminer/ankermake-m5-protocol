@@ -7,19 +7,20 @@ Last updated: 2026-07-20
 - Working branch: `local-control`
 - Remote branch: `origin/local-control`
 - Upstream draft PR: [anselor/ankermake-m5-protocol#15](https://github.com/anselor/ankermake-m5-protocol/pull/15)
-- Incident tracker: [bigminer/ankermake-m5-protocol#5](https://github.com/bigminer/ankermake-m5-protocol/issues/5)
+- Parent design issue: [bigminer/ankermake-m5-protocol#6](https://github.com/bigminer/ankermake-m5-protocol/issues/6)
 - Latest pushed commit: `d1e7f0c` (`Restore minimal M5C stop payload`)
-- Local `HEAD`: this handoff's `Add server-owned printer snapshots and actions`
-  commit, four commits ahead of `origin/local-control`.
-- The macOS web service was restarted after `d1e7f0c`; the Home lockout and
-  current minimal Stop payload are deployed. The payload failed against the
-  latest Orca-started job, as documented below.
-- Last operator report: a second supervised Orca job was physically stopped at
-  layer 25/43 after web Pause and Stop failed. A physical square-button
-  long-press cleared the job and moved the toolhead to the back-left with Z
-  raised. Do not call that location "home"; the operator was uncertain. Both
-  heater targets were 0 and the printer was cooling. Always ask before a new
-  physical action.
+- Local implementation history ends with `9297eb3` (`Validate printer state and
+  upload acknowledgements`) plus this handoff-only closeout commit. The final
+  branch is six commits ahead of `origin/local-control`; none of those six
+  commits has been pushed.
+- The macOS web service is running the local code. Named-action validation mode
+  was returned to `false`; the new Pause/Resume/Stop path is not enabled for
+  normal use.
+- Final observed printer state for this session: state 0, no active job, nozzle
+  target 0, bed target 0. The synthetic upload attempts caused beeps but no
+  active job, heating, homing, extrusion, or observed motion.
+- This session is closed with no active printer work. Always obtain new
+  current-session operator confirmation before any later physical action.
 
 The worktree contains local user state that must not be modified, staged, or
 committed without explicit instruction:
@@ -31,9 +32,10 @@ The Chrony PID-file repair and its documentation were committed in `261f8ce`.
 Do not stage `.env` or `.playwright-mcp/`. Any documentation changes below are
 the intended scope of the current live follow-up.
 
-The current project work adds the issue #7 server-owned snapshot foundation and
-the issue #8/#11 named Stop/Pause/Resume action path. The action path is
-disabled by default and still needs supervised live validation.
+The current project work completed the issue #7 server-owned snapshot
+foundation and the issue #8/#11 named Stop/Pause/Resume action path. Those
+three implementation issues are closed. The action path remains disabled by
+default and still needs supervised live validation in #9 and #16.
 
 An attended follow-up found and fixed two additional preflight gaps: normalized
 state omitted the real 1000/subType 1 `value`, and PPPP file transfer did not
@@ -41,6 +43,25 @@ check its one-byte acknowledgement result. Synthetic no-motion uploads received
 valid transfer acknowledgements but never became active jobs, so no named
 Pause/Resume/Stop action was sent. Final state was idle with both targets zero;
 the local validation-mode setting was returned to `false`.
+
+## Session closeout and GitHub disposition
+
+This effort is deliberately done for now. There is no active monitoring,
+validation, or printer action to resume automatically.
+
+| Issue | Final session disposition |
+| --- | --- |
+| #5 — original Home/Pause/Stop incident | Already closed as not planned; received a final comment pointing to the replacement issue tree and the 2026-07-20 failure evidence |
+| #6 — deep Printer-action module | Open parent; updated with the completed slices, safe-suite result, invalid synthetic fixture, and paused status |
+| #7 — server-owned Printer snapshot | Closed completed |
+| #8 — Protective Stop tracer bullet | Closed completed for offline implementation; #9 retains live validation |
+| #9 — supervised Protective Stop | Open; synthetic attempt was invalid and no Stop was sent |
+| #11 — Pause/Resume migration | Closed completed for offline implementation; #16 retains live validation |
+| #16 — supervised Pause/Resume | Open; synthetic attempt was invalid and neither action was sent |
+
+Issues #10 and #12-#19 remain open future slices under #6. No claim is made
+that the whole parent design is complete. The GitHub comments explicitly note
+that the implementation commits are local and not pushed.
 
 ## Mandatory safety rules
 
@@ -458,14 +479,17 @@ Also completed:
 - `./scripts/check-secrets.sh`
 
 No live Home validation is permitted under the current implementation. The
-restored Stop correction has offline/browser coverage only and must not be
-described as revalidated on a live print yet. Current validation for the newer,
-uncommitted heartbeat mitigation is recorded in the July 19 section above.
+restored Stop correction and the newer named action path must not be described
+as successfully revalidated on a live print. The complete session evidence is
+recorded above and in `documentation/printer-findings.md`.
 
 ## Recommended next work
 
-Track the work in
-[issue #5](https://github.com/bigminer/ankermake-m5-protocol/issues/5).
+There is no scheduled next action. If the effort is resumed, track the design
+under [issue #6](https://github.com/bigminer/ankermake-m5-protocol/issues/6),
+Stop validation under [issue #9](https://github.com/bigminer/ankermake-m5-protocol/issues/9),
+and Pause/Resume validation under
+[issue #16](https://github.com/bigminer/ankermake-m5-protocol/issues/16).
 
 1. Keep Home disabled and the server rejection in place.
 2. Capture a complete known-good official print-start/calibration flow,
@@ -473,14 +497,16 @@ Track the work in
    published firmware before designing a standalone workflow.
 3. Accept that safe standalone Home may not be exposed by production firmware;
    if so, permanently omit the feature.
-4. Revalidate Pause/Resume using the exact server-recorded upload identity.
-5. Revalidate global Stop separately and capture its exact `1008` reply. Never
-   add Pause/Resume identity fields to Stop.
-6. Use a no-extrusion/no-homing fixture and require telemetry confirmation:
-   Pause/Resume must transition the same job; Stop must clear the job, leave an
-   inactive state, and show zero nozzle/bed targets.
-7. Keep the named action path disabled outside supervised validation until
-   those checks pass; update the GitHub issue before restoring confidence copy.
+4. Keep the named action path disabled outside supervised validation.
+5. Before another Stop attempt, solve the fixture problem: #9 still forbids
+   homing and unrelated motion, while this session's synthetic zero-motion files
+   never became active jobs. Do not substitute a normal sliced print without a
+   separate safety review or explicit revision of that validation contract.
+6. If Pause/Resume validation resumes, use the exact server-recorded upload
+   identity and a separately authorized, known-safe real print under #16.
+7. Revalidate global Stop independently, capture its exact `1008` reply, and
+   require job-cleared, inactive-state, and zero-target telemetry. Never add
+   Pause/Resume identity fields to Stop.
 
 ## Useful commands
 
