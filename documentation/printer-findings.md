@@ -373,6 +373,21 @@ consistent with the printer's preheat/start phase.
 | The Mac's local-broker/hotspot stack remained healthy while the printer disappeared from the hotspot | broker, DNS, NTP, Internet Sharing bridge, and pf checks all passed; the printer had 100% loss, no ARP entry, and no response on its known local service ports | observations `CONFIRMED`; weak/offline printer Wi-Fi or an address change `SUPPORTED`, not distinguished |
 | Fixed-rate `M105` polling is redundant while normalized state telemetry is arriving | browser regression test shows fresh `/ws/state` traffic suppresses the next heartbeat; one probe resumes after the 15-second stale threshold | `CONFIRMED` in browser test; prevention of a printer Wi-Fi/MQTT disconnect `UNVERIFIED` |
 
+### Same-room hotspot recovery and cold-boot follow-up (2026-07-20)
+
+The operator moved the Mac into the printer's room and had to power the Mac down
+and restart it. Placement and hotspot recreation therefore changed together;
+the recovery cannot be attributed to distance alone.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| The printer rejoined the Mac-hosted hotspot and local broker after the move/reboot | broker client source was on the Internet Sharing subnet; notices resumed every ~3s; passive `/ws/state` reported nozzle 23C with target 0C | recovery `CONFIRMED`; whether placement or reboot caused it `UNVERIFIED` |
+| The first 120-packet “same-room” sample tested the wrong address | `setup.local.conf` still held a LAN address routed over `en0`, not the live broker client's hotspot address | `INVALID-TEST` for hotspot quality; do not use its latency figures |
+| The actual same-room hotspot link was clean | broker-derived printer address routed over `bridge100`; 30/30 replies, 0% loss, 3.34ms average, 10.96ms maximum; later post-reload sample was 10/10 at 2.60ms average | current link quality `CONFIRMED`; long-print durability still needs revalidation |
+| `ankerctl` cached the correct PPPP hotspot address, while the ignored diagnostic config was stale | cached `ip_addr` matched the live broker source; `setup.local.conf` did not and was corrected locally | `CONFIRMED` |
+| The Mac cold boot exposed a persistent Chrony PID-file collision | launchd crash-looped; `/opt/ankerm5c/chronyd.pid` named PID 309, which belonged to `storagekitd`; no process listened on UDP/123 | root cause `CONFIRMED` |
+| Moving Chrony's PID file to `/var/run` restores the installed NTP service | regression test failed on the persistent path and passed after the change; installed stack reported Chrony listening, runtime PID identified `chronyd`, and all verification checks passed | immediate fix `CONFIRMED`; another cold boot `NEEDS REVALIDATION` |
+
 **Lesson worth more than any single reading: when this printer has a hard problem,
 the answer has repeatedly been its own physical interface or the runbook — not a
 command we inferred.** The button beat every opcode we considered.

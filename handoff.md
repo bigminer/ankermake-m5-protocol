@@ -9,8 +9,8 @@ Last updated: 2026-07-19
 - Upstream draft PR: [anselor/ankermake-m5-protocol#15](https://github.com/anselor/ankermake-m5-protocol/pull/15)
 - Incident tracker: [bigminer/ankermake-m5-protocol#5](https://github.com/bigminer/ankermake-m5-protocol/issues/5)
 - Latest pushed commit: `d1e7f0c` (`Restore minimal M5C stop payload`)
-- Local `HEAD`: `0d80e46` (`Harden local printer control safety`), one commit
-  ahead of `origin/local-control`.
+- Local `HEAD`: `3e63450` (`Reduce redundant printer heartbeats and document
+  MQTT gap`), two commits ahead of `origin/local-control`.
 - The macOS web service was restarted after `d1e7f0c`; the Home lockout and
   corrected Stop payload are deployed.
 - Last operator report: the supervised Orca job finished normally. The printer
@@ -26,18 +26,14 @@ committed without explicit instruction:
 - `.playwright-mcp/` is an untracked user/browser artifact directory.
 
 The worktree also contains deliberate, uncommitted project changes from the
-2026-07-19 observation-gap investigation and documentation audit:
+2026-07-20 cold-boot follow-up:
 
-- `static/ankersrv.js` — suppress redundant heartbeats while telemetry is fresh.
-- `tests/test_browser_ui.py` — regression coverage for heartbeat suppression and
-  stale-telemetry recovery.
-- `HANDOFF.md` and `documentation/printer-findings.md` — complete session record
-  and confidence ledger.
-- `CLAUDE.md`, `CONTEXT.md`, `documentation/local-macos-service.md`,
-  `documentation/printer-test-validation.md`,
-  `documentation/local-control-research.md`,
-  `documentation/next-step-local-broker.md`, and
-  `deploy/local-broker/README.md` — contradiction/safety audit updates.
+- `deploy/local-broker/chrony.conf` and `deploy/local-broker/README.md` — use a
+  boot-cleared Chrony runtime PID file and document why.
+- `tests/test_local_broker_config.py` — regression coverage for the persistent
+  PID-file failure.
+- `HANDOFF.md` and `documentation/printer-findings.md` — corrected network-test
+  evidence and cold-boot findings.
 
 Do not stage `.env` or `.playwright-mcp/`. The project files listed above are the
 intended scope if this follow-up is committed.
@@ -258,6 +254,41 @@ of the original disconnect remains `UNVERIFIED`.
 Do not claim the observation gap is fully fixed until that live validation
 passes. The current result is: failure boundary confirmed, network cause
 strongly supported, redundant-polling defect fixed offline.
+
+## 2026-07-20 same-room and cold-boot follow-up
+
+The operator moved the Mac into the printer's room and also power-cycled the Mac.
+Those two changes are confounded: the printer's recovery may be due to stronger
+signal, recreation of Internet Sharing during boot, or both.
+
+The printer did rejoin the Mac-hosted hotspot and local broker. Fresh notices
+arrived every three seconds, and passive `/ws/state` delivered nozzle 23 C with
+target 0 C. The `ankerctl` cached PPPP address matched the live printer source.
+
+An important test correction: `setup.local.conf` still named a household-LAN
+address routed through `en0`. The first 30- and 120-packet samples tested that
+wrong path and are `INVALID-TEST` for hotspot quality. The ignored local config
+was corrected to the printer address taken directly from its broker connection.
+The valid hotspot sample routed through `bridge100`: 30/30 replies, 0% loss,
+3.34 ms average, 10.96 ms maximum. After daemon reload it remained 10/10 with a
+2.60 ms average and fresh MQTT notices.
+
+The cold boot exposed a separate persistence defect. Chrony crash-looped because
+`/opt/ankerm5c/chronyd.pid` survived reboot with PID 309, while the new boot had
+assigned PID 309 to `storagekitd`. UDP/123 therefore had no listener. A new
+regression test reproduces the configuration error. The PID file now lives at
+`/var/run/com.ankerm5c.chronyd.pid`, which is boot-cleared. After reinstall:
+
+- the regression test passes;
+- Chrony is `running`, one launch, with its runtime PID naming `chronyd`;
+- privileged local-broker verification reports `ALL OK`;
+- printer MQTT notices resumed immediately after the broker reload;
+- the actual hotspot path remained lossless.
+
+This proves the immediate repair. The PID-file fix still needs one additional
+cold boot before boot persistence can be called `CONFIRMED`. The observation-gap
+mitigation still needs a small print monitored from start to finish in the new
+same-room placement.
 
 ## Homing incident and current containment
 

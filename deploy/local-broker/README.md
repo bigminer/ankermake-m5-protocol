@@ -15,6 +15,9 @@ cloud on the LAN:
 Everything installs under `/opt/ankerm5c/`. The design and the evidence it is
 based on are in
 [../../documentation/local-control-research.md](../../documentation/local-control-research.md).
+Chrony's PID file is deliberately stored under `/var/run`, not this persistent
+prefix, so a pre-reboot PID cannot collide with an unrelated process after the
+Mac starts again.
 
 ## How the cloud is severed (egress allowlist, not a blocklist)
 
