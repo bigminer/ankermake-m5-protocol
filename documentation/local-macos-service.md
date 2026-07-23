@@ -106,7 +106,7 @@ not part of this printer stack.
 
 ```sh
 cd /Users/you
-git clone https://github.com/Ankermgmt/ankermake-m5-protocol.git
+git clone https://github.com/bigminer/ankermake-m5-protocol.git
 cd ankermake-m5-protocol
 
 python3 -m venv .venv
@@ -158,7 +158,7 @@ Environment variables:
 | `ANKERCTL_MAX_UPLOAD_BYTES` | Largest accepted slicer upload | Defaults to 512 MiB; lower it if your profiles allow |
 | `ANKERCTL_PREPRINT_G36` | Experimental pre-upload preparation hook | Must remain `false` |
 | `ANKERCTL_PREPRINT_COMMAND_TIMEOUT` | Experimental hook timeout | Present but unused while hook is disabled |
-| `ANKERCTL_ACTION_VALIDATION_MODE` | Enables named Pause/Resume/Stop actions | Must remain `false` outside an attended validation |
+| `ANKERCTL_ACTION_VALIDATION_MODE` | Enables named print, thermal, and fan actions | Must remain `false` outside an attended validation |
 | `ANKERCTL_ACTION_CONFIRMATION_TIMEOUT` | Time allowed for telemetry confirmation | Defaults to 30 seconds |
 | `ANKERCTL_ACTION_JOURNAL_PATH` | Durable action-outcome journal | Optional; defaults to the user's local state directory |
 | `ANKERCTL_WEBCAM_URL` | Optional environment-level webcam URL | Not required when URL is saved in `default.json` |
@@ -262,8 +262,12 @@ requires the configured slicer API key.
 
 ### Control tab homing safety
 
-Raw G-code, fan, jog and temperature controls use the known
-`GCODE_COMMAND` MQTT primitive.
+Raw G-code and jog controls use the known `GCODE_COMMAND` MQTT primitive.
+Temperature and fan controls retain that legacy path while validation mode is
+off. In validation mode they submit typed Printer actions so target bounds,
+freshness, Protective heater-off behavior, per-resource supersession, and
+outcomes are owned by the server. The named thermal/fan path remains gated
+until issue #15 records successful Supervised validation.
 
 The Control-tab Home button is disabled. Two supervised tests on this M5C
 drove the nozzle into the build plate without the expected probe detection:

@@ -2,7 +2,11 @@ import contextlib
 
 from web.printer_actions import (
     ActionRequest,
+    BedTarget,
+    FanSetting,
+    HeaterOff,
     MqttActionProtocol,
+    NozzleTarget,
     Pause,
     PrinterActions,
     Resume,
@@ -433,3 +437,275 @@ def test_protective_stop_dispatches_both_effects_before_waiting_for_exact_reply(
         {"commandType": 0x0413, "cmdData": "M2024", "cmdLen": 5},
     ]
     assert reply == {"commandType": 1008, "reply": 0}
+
+
+def test_temperature_targets_require_fresh_action_specific_facts(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe("printer-0", {"nozzle": {"current": 2000}})
+    protocol = RecordingProtocol()
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=protocol,
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+    )
+
+    nozzle = actions.submit(
+        ActionRequest("nozzle-1", "printer-0", NozzleTarget(celsius=40))
+    )
+    bed = actions.submit(
+        ActionRequest("bed-1", "printer-0", BedTarget(celsius=35))
+    )
+
+    assert nozzle.status == "accepted"
+    assert bed.status == "rejected"
+    assert bed.reason == "fresh_bed_temperature_required"
+    assert protocol.effects == [("gcode", "printer-0", "M104 S40")]
+
+
+def test_temperature_target_limits_are_server_owned(tmp_path):
+    actions = PrinterActions(
+        snapshots=PrinterSnapshots(clock=FakeClock()),
+        protocol=RecordingProtocol(),
+        journal_path=tmp_path / "actions.jsonl",
+        clock=FakeClock(),
+        validation_mode=True,
+    )
+
+    invalid = [
+        NozzleTarget(celsius=0),
+        NozzleTarget(celsius=301),
+        NozzleTarget(celsius=40.5),
+        BedTarget(celsius=0),
+        BedTarget(celsius=101),
+        BedTarget(celsius=True),
+    ]
+
+    for index, action in enumerate(invalid):
+        outcome = actions.submit(ActionRequest(f"invalid-{index}", "printer-0", action))
+        assert outcome.status == "rejected"
+        assert outcome.reason == "invalid_action_parameters"
+
+
+def test_new_temperature_target_supersedes_only_the_same_resource(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe(
+        "printer-0",
+        {"nozzle": {"current": 2000}, "bed": {"current": 2100}},
+    )
+    protocol = RecordingProtocol()
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=protocol,
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+    )
+
+    actions.submit(
+        ActionRequest("nozzle-40", "printer-0", NozzleTarget(celsius=40))
+    )
+    actions.submit(ActionRequest("bed-35", "printer-0", BedTarget(celsius=35)))
+    actions.submit(
+        ActionRequest("nozzle-50", "printer-0", NozzleTarget(celsius=50))
+    )
+
+    current = next(actions.watch(Watch("printer-0")))
+    assert current.actions["nozzle-40"].status == "superseded"
+    assert current.actions["nozzle-40"].reason == "newer_target_submitted"
+    assert current.actions["bed-35"].status == "accepted"
+    assert current.actions["nozzle-50"].status == "accepted"
+    assert protocol.effects == [
+        ("gcode", "printer-0", "M104 S40"),
+        ("gcode", "printer-0", "M140 S35"),
+        ("gcode", "printer-0", "M104 S50"),
+    ]
+
+
+def test_temperature_target_confirms_only_from_a_new_matching_observation(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe(
+        "printer-0",
+        {"nozzle": {"current": 3900, "target": 4000}},
+    )
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=RecordingProtocol(),
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+    )
+
+    actions.submit(
+        ActionRequest("nozzle-40", "printer-0", NozzleTarget(celsius=40))
+    )
+    actions.tick()
+    assert (
+        next(actions.watch(Watch("printer-0"))).actions["nozzle-40"].status
+        == "accepted"
+    )
+
+    clock.now += 1
+    snapshots.observe("printer-0", {"nozzle": {"target": 4000}})
+    actions.tick()
+
+    assert (
+        next(actions.watch(Watch("printer-0"))).actions["nozzle-40"].status
+        == "confirmed"
+    )
+
+
+def test_protective_heater_off_bypasses_freshness_and_confirms_targets(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    protocol = RecordingProtocol()
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=protocol,
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+    )
+
+    accepted = actions.submit(
+        ActionRequest("heaters-off", "printer-0", HeaterOff(heater="all"))
+    )
+
+    assert accepted.status == "accepted"
+    assert protocol.effects == [
+        ("gcode", "printer-0", "M104 S0"),
+        ("gcode", "printer-0", "M140 S0"),
+    ]
+
+    clock.now += 1
+    snapshots.observe(
+        "printer-0",
+        {"nozzle": {"target": 0}, "bed": {"target": 0}},
+    )
+    actions.tick()
+
+    assert (
+        next(actions.watch(Watch("printer-0"))).actions["heaters-off"].status
+        == "confirmed"
+    )
+
+
+def test_fan_setting_requires_fresh_state_and_never_confirms_from_ack(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe("printer-0", {"state": "idle"})
+    protocol = RecordingProtocol()
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=protocol,
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+        confirmation_timeout=30,
+    )
+
+    accepted = actions.submit(
+        ActionRequest("fan-50", "printer-0", FanSetting(percent=50))
+    )
+
+    assert accepted.status == "accepted"
+    assert protocol.effects == [("gcode", "printer-0", "M106 S128")]
+
+    clock.now += 31
+    actions.tick()
+
+    outcome = next(actions.watch(Watch("printer-0"))).actions["fan-50"]
+    assert outcome.status == "indeterminate"
+    assert outcome.reason == "confirmation_unavailable"
+
+
+def test_fan_setting_bounds_and_stale_state_are_rejected(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe("printer-0", {"state": "idle"})
+    clock.now += 16
+    protocol = RecordingProtocol()
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=protocol,
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+    )
+
+    stale = actions.submit(
+        ActionRequest("fan-stale", "printer-0", FanSetting(percent=50))
+    )
+    invalid = actions.submit(
+        ActionRequest("fan-invalid", "printer-0", FanSetting(percent=101))
+    )
+
+    assert stale.status == "rejected"
+    assert stale.reason == "fresh_printer_state_required"
+    assert invalid.status == "rejected"
+    assert invalid.reason == "invalid_action_parameters"
+    assert protocol.effects == []
+
+
+def test_parameterized_action_retry_survives_restart_without_replay(tmp_path):
+    clock = FakeClock()
+    journal = tmp_path / "actions.jsonl"
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe("printer-0", {"nozzle": {"current": 2000}})
+    first_protocol = RecordingProtocol()
+    first = PrinterActions(
+        snapshots=snapshots,
+        protocol=first_protocol,
+        journal_path=journal,
+        clock=clock,
+        validation_mode=True,
+    )
+    request = ActionRequest("nozzle-40", "printer-0", NozzleTarget(celsius=40))
+    first.submit(request)
+
+    restarted_protocol = RecordingProtocol()
+    restarted = PrinterActions(
+        snapshots=PrinterSnapshots(clock=clock),
+        protocol=restarted_protocol,
+        journal_path=journal,
+        clock=clock,
+        validation_mode=True,
+    )
+
+    retry = restarted.submit(request)
+    conflict = restarted.submit(
+        ActionRequest("nozzle-40", "printer-0", NozzleTarget(celsius=45))
+    )
+
+    assert retry.status == "indeterminate"
+    assert retry.reason == "server_restarted_before_confirmation"
+    assert conflict.status == "rejected"
+    assert conflict.reason == "request_identity_conflict"
+    assert restarted_protocol.effects == []
+
+
+def test_obsolete_validation_evidence_does_not_ungate_changed_contract(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe("printer-0", {"nozzle": {"current": 2000}})
+    protocol = RecordingProtocol()
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=protocol,
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=False,
+        validated_contracts={"nozzle_target": "obsolete-contract"},
+    )
+
+    outcome = actions.submit(
+        ActionRequest("nozzle-40", "printer-0", NozzleTarget(celsius=40))
+    )
+
+    assert outcome.status == "rejected"
+    assert outcome.reason == "supervised_validation_required"
+    assert protocol.effects == []

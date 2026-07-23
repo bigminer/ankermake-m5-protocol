@@ -48,7 +48,11 @@ from web.lib.service import ServiceManager, RunState, ServiceStoppedError
 from web.printer_snapshot import CursorExpired, PrinterSnapshots, Watch
 from web.printer_actions import (
     ActionRequest,
+    BedTarget,
+    FanSetting,
+    HeaterOff,
     MqttActionProtocol,
+    NozzleTarget,
     Pause,
     PrinterActions,
     Resume,
@@ -320,7 +324,16 @@ def ctrl_submit_action(sock, message):
         return
 
     action_type = str(message.get("type", "")).lower()
-    action = {"pause": Pause, "resume": Resume, "stop": Stop}.get(action_type)
+    constructors = {
+        "pause": lambda: Pause(),
+        "resume": lambda: Resume(),
+        "stop": lambda: Stop(),
+        "nozzle_target": lambda: NozzleTarget(celsius=message.get("celsius")),
+        "bed_target": lambda: BedTarget(celsius=message.get("celsius")),
+        "heater_off": lambda: HeaterOff(heater=message.get("heater")),
+        "fan_setting": lambda: FanSetting(percent=message.get("percent")),
+    }
+    action = constructors.get(action_type)
     request_id = str(message.get("requestId", "")).strip()
     if action is None or not request_id:
         sock.send(json.dumps({"actionError": "invalid_action_request"}))

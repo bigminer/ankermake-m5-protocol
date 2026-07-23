@@ -516,6 +516,195 @@ def test_validation_mode_pause_uses_named_action_and_renders_pending_state(
     assert "awaiting" in page.locator("#print-action-status").inner_text().lower()
 
 
+def test_validation_mode_thermal_and_fan_controls_use_named_actions(
+    page, live_http_server, configured_app
+):
+    configured_app.config["action_validation_mode"] = True
+    _login(page, live_http_server)
+    page.click("#control-tab")
+    page.wait_for_function("!document.querySelector('#fan-apply').disabled")
+
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state")).emit({
+            cursor: 10,
+            state: "idle",
+            nozzle: {current: 2000, target: 0},
+            bed: {current: 2100, target: 0},
+            facts: {
+                state: {value: "idle", freshness: "fresh"},
+                "nozzle.current": {value: 2000, freshness: "fresh"},
+                "nozzle.target": {value: 0, freshness: "fresh"},
+                "bed.current": {value: 2100, freshness: "fresh"},
+                "bed.target": {value: 0, freshness: "fresh"},
+            },
+        });
+        """
+    )
+
+    page.click("#control-nozzle-input")
+    page.wait_for_function(
+        "document.querySelector('#temperature-picker').dataset.temperatureTarget === 'control-nozzle-input'"
+    )
+    page.locator("#temperature-picker-range").evaluate("el => el.value = '40'")
+    page.click("#popupModalInputOK")
+    page.wait_for_selector("#popupModalInput", state="hidden")
+
+    page.click("#control-bed-input")
+    page.wait_for_function(
+        "document.querySelector('#temperature-picker').dataset.temperatureTarget === 'control-bed-input'"
+    )
+    page.locator("#temperature-picker-range").evaluate("el => el.value = '35'")
+    page.click("#popupModalInputOK")
+    page.wait_for_selector("#popupModalInput", state="hidden")
+
+    page.locator("#fan-slider").evaluate(
+        "el => { el.value = '50'; el.dispatchEvent(new Event('input')); }"
+    )
+    page.click("#fan-apply")
+
+    page.click("#control-nozzle-input")
+    page.wait_for_function(
+        "document.querySelector('#temperature-picker').dataset.temperatureTarget === 'control-nozzle-input'"
+    )
+    page.locator("#temperature-picker-range").evaluate("el => el.value = '0'")
+    page.click("#popupModalInputOK")
+    page.wait_for_selector("#popupModalInput", state="hidden")
+
+    named = [
+        frame["action"]
+        for frame in _ctrl_frames(page)
+        if "action" in frame
+    ]
+    assert [
+        {key: value for key, value in action.items() if key != "requestId"}
+        for action in named
+    ] == [
+        {"type": "nozzle_target", "celsius": 40},
+        {"type": "bed_target", "celsius": 35},
+        {"type": "fan_setting", "percent": 50},
+        {"type": "heater_off", "heater": "nozzle"},
+    ]
+    assert all(action["requestId"] for action in named)
+    assert _commands(page) == []
+    assert page.locator("#control-nozzle-input").input_value() == "0"
+    assert page.locator("#control-bed-input").input_value() == "0"
+
+
+def test_validation_mode_renders_server_owned_thermal_and_fan_outcomes(
+    page, live_http_server, configured_app
+):
+    configured_app.config["action_validation_mode"] = True
+    _login(page, live_http_server)
+    page.click("#control-tab")
+
+    state_socket = (
+        "window.__wsInstances.find((ws) => ws.url.includes('/ws/state'))"
+    )
+    page.evaluate(
+        f"""
+        {state_socket}.emit({{
+            cursor: 11,
+            actions: {{
+                "nozzle-1": {{
+                    requestId: "nozzle-1",
+                    action: "nozzle_target",
+                    status: "accepted",
+                    reason: null,
+                    updatedAt: 11,
+                }},
+            }},
+            facts: {{}},
+        }});
+        """
+    )
+    thermal = page.locator("#thermal-action-status").inner_text().lower()
+    assert "accepted" in thermal
+    assert "awaiting printer confirmation" in thermal
+
+    page.evaluate(
+        f"""
+        {state_socket}.emit({{
+            cursor: 12,
+            actions: {{
+                "nozzle-1": {{
+                    requestId: "nozzle-1",
+                    action: "nozzle_target",
+                    status: "confirmed",
+                    reason: null,
+                    updatedAt: 12,
+                }},
+            }},
+            facts: {{}},
+        }});
+        """
+    )
+    assert "confirmed" in page.locator("#thermal-action-status").inner_text().lower()
+
+    page.evaluate(
+        f"""
+        {state_socket}.emit({{
+            cursor: 13,
+            actions: {{
+                "nozzle-1": {{
+                    requestId: "nozzle-1",
+                    action: "nozzle_target",
+                    status: "superseded",
+                    reason: "newer_target_submitted",
+                    updatedAt: 13,
+                }},
+            }},
+            facts: {{}},
+        }});
+        """
+    )
+    thermal = page.locator("#thermal-action-status").inner_text().lower()
+    assert "superseded" in thermal
+    assert "newer request" in thermal
+
+    page.evaluate(
+        f"""
+        {state_socket}.emit({{
+            cursor: 14,
+            actions: {{
+                "bed-1": {{
+                    requestId: "bed-1",
+                    action: "bed_target",
+                    status: "rejected",
+                    reason: "fresh_bed_temperature_required",
+                    updatedAt: 14,
+                }},
+            }},
+            facts: {{}},
+        }});
+        """
+    )
+    thermal = page.locator("#thermal-action-status").inner_text().lower()
+    assert "not sent" in thermal
+    assert "fresh_bed_temperature_required" in thermal
+
+    page.evaluate(
+        f"""
+        {state_socket}.emit({{
+            cursor: 15,
+            actions: {{
+                "fan-1": {{
+                    requestId: "fan-1",
+                    action: "fan_setting",
+                    status: "indeterminate",
+                    reason: "confirmation_unavailable",
+                    updatedAt: 15,
+                }},
+            }},
+            facts: {{}},
+        }});
+        """
+    )
+    fan = page.locator("#fan-action-status").inner_text().lower()
+    assert "could not be confirmed" in fan
+    assert "confirmation_unavailable" in fan
+
+
 def test_validation_mode_protective_stop_remains_available_with_stale_state(
     page, live_http_server, configured_app
 ):
