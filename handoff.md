@@ -13,9 +13,9 @@ Last updated: 2026-07-23
 - The Git remote named `upstream` currently points to
   `anselor/ankermake-m5-protocol`. It is an external repository reference, not
   the working repository or the default destination for merges and pushes.
-- `anselor/ankermake-m5-protocol#15` is an external pull request sourced from
-  `bigminer:local-control`. It is not “PR #15” in the working repository, and
-  the `bigminer` account currently has read-only access to that external
+- `anselor/ankermake-m5-protocol#15` was an external pull request sourced from
+  the former `bigminer:local-control` branch. It closed unmerged when that
+  fully merged source branch was removed. It is not “PR #15” in the working
   repository.
 - [`bigminer/ankermake-m5-protocol#15`](https://github.com/bigminer/ankermake-m5-protocol/issues/15)
   is the open **issue** “Supervised validation: thermal and fan actions”; there
@@ -23,10 +23,16 @@ Last updated: 2026-07-23
 
 ## Current repository state
 
-- Working branch: `issue-10-thermal-fan-actions`, based on `local-control`.
+- `main` and `origin/main` are synchronized at the merge of
+  [`bigminer/ankermake-m5-protocol#20`](https://github.com/bigminer/ankermake-m5-protocol/pull/20).
+  PR #20 joined the prior checkpoint-merge ancestry with the remaining
+  `local-control` commits. The fully merged local and remote `local-control`
+  branches were then deleted.
+- Working branch: `issue-10-thermal-fan-actions`, based directly on the unified
+  `main`.
 - The Issue 10 implementation and its 2026-07-23 attended validation evidence
-  are local and uncommitted. No remote branch or pull request exists yet for
-  this work.
+  are committed and pushed in draft
+  [`bigminer/ankermake-m5-protocol#21`](https://github.com/bigminer/ankermake-m5-protocol/pull/21).
 - Issue 10 now has typed nozzle-target, bed-target, heater-off, and fan actions;
   server-owned validation, freshness, supersession, confirmation, journaling,
   and contract gating; validation-mode browser integration; and deterministic
@@ -41,6 +47,10 @@ Last updated: 2026-07-23
   target 0, and bed target 0.
 - Current checks: 98 offline tests passed with 8 skipped; 27 browser tests
   passed; JavaScript syntax, `git diff --check`, and the secret sweep passed.
+- Origin branch cleanup removed `local-control`, `master`,
+  `exiles-1.1-rebased`, `pyinstaller`, and `treitmayr_mqtt-commands` after
+  verifying they were merged or had no unique patch content. The remaining
+  legacy branches were retained because they still contain unique commits.
 - There is no active printer action. Always obtain new current-session operator
   confirmation before any later physical action.
 
@@ -68,7 +78,8 @@ the local validation-mode setting was returned to `false`.
 ## Session closeout and GitHub disposition
 
 There is no active monitoring, validation, or printer action to resume
-automatically. Issue 10 implementation work is pending review and publication.
+automatically. Issue 10 implementation work is published for review in draft
+PR #21.
 
 | Issue | Final session disposition |
 | --- | --- |
@@ -77,15 +88,15 @@ automatically. Issue 10 implementation work is pending review and publication.
 | #7 — server-owned Printer snapshot | Closed completed |
 | #8 — Protective Stop tracer bullet | Closed completed for offline implementation; #9 retains live validation |
 | #9 — supervised Protective Stop | Open; synthetic attempt was invalid and no Stop was sent |
-| #10 — thermal and fan action migration | Implementation complete locally with passing offline/browser tests; not committed or published |
+| #10 — thermal and fan action migration | Implementation complete with passing offline/browser tests; published in draft PR #21 |
 | #11 — Pause/Resume migration | Closed completed for offline implementation; #16 retains live validation |
 | #15 — supervised thermal/fan validation | Open; bounded live behavior recorded, but numeric human heater observation and fan telemetry are unavailable |
 | #16 — supervised Pause/Resume | Open; synthetic attempt was invalid and neither action was sent |
 
 Issues #12-#19 remain open slices under #6; #15 has the partial evidence noted
 above. No claim is made that the whole parent design is complete. Earlier
-session history was published to `origin/local-control`; the current Issue 10
-work has not been published.
+session history is now merged into `origin/main` through PR #20; the former
+`local-control` branch no longer exists.
 
 ## Mandatory safety rules
 
