@@ -2,6 +2,7 @@ import unittest
 from queue import Empty
 from types import SimpleNamespace
 
+from libflagship.ppppapi import PPPPError
 from web.service.filetransfer import FileTransferService
 
 
@@ -38,7 +39,7 @@ class FileTransferTimeoutTests(unittest.TestCase):
         self.assertEqual(queue.timeout, 15)
 
     def test_acknowledgement_returns_normally(self):
-        response = object()
+        response = SimpleNamespace(data=b"\x00")
         queue = FakeQueue(result=response)
         service = SimpleNamespace(
             _tap=queue,
@@ -55,6 +56,40 @@ class FileTransferTimeoutTests(unittest.TestCase):
         )
 
         self.assertEqual(queue.timeout, 15)
+
+    def test_nonzero_acknowledgement_is_rejected(self):
+        queue = FakeQueue(result=SimpleNamespace(data=b"\xff"))
+        service = SimpleNamespace(
+            _tap=queue,
+            api_aabb=lambda *args, **kwargs: None,
+            name="FileTransferService",
+        )
+
+        with self.assertRaisesRegex(PPPPError, "ERR_BUSY"):
+            FileTransferService.api_aabb_request(
+                service,
+                api=object(),
+                frametype=object(),
+                msg=b"block",
+                pos=0,
+            )
+
+    def test_malformed_acknowledgement_is_rejected(self):
+        queue = FakeQueue(result=SimpleNamespace(data=b""))
+        service = SimpleNamespace(
+            _tap=queue,
+            api_aabb=lambda *args, **kwargs: None,
+            name="FileTransferService",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Unexpected file-transfer reply"):
+            FileTransferService.api_aabb_request(
+                service,
+                api=object(),
+                frametype=object(),
+                msg=b"block",
+                pos=0,
+            )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,23 @@
 # Project Instructions
 
+## Before diagnosing the printer
+
+- **Read [`documentation/printer-findings.md`](documentation/printer-findings.md) first**
+  — it records what we know, what failed, and which conclusions were retracted.
+  Append what you learn, with a status. Don't delete refuted entries.
+
+- **If the printer seems dead, locate the silent layer before restarting
+  anything.** Check `/opt/ankerm5c/logs/mosquitto.out.log` first; `ankerctl`'s
+  status API reports its own threads, not printer presence.
+
+  - If printer PUBLISHes are current but web state is stale, restart `ankerctl`:
+    `launchctl kickstart -k gui/$(id -u)/com.ankerctl.webserver`. This recovered
+    the confirmed 2026-07-15 service-thread wedge.
+  - If the broker logged the printer client disconnecting and PUBLISHes stopped,
+    an `ankerctl` restart cannot force the remote printer back onto Wi-Fi. Check
+    the hotspot neighbor/lease, signal path, and local-broker stack. This was the
+    confirmed 2026-07-19 observation gap.
+
 ## Printer safety
 
 - **Always confirm the human is present before operating the 3D printer
@@ -38,3 +56,17 @@
 
   If a commit would include any of the above, stop and tell the operator instead
   of committing.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked as GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the default five-label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses the single-context layout. See `docs/agents/domain.md`.

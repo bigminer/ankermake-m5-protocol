@@ -392,6 +392,9 @@ printer:
 - `ankerctl --insecure mqtt monitor` connected to the local broker and decoded
   live nozzle and bed telemetry.
 - A raw `G28` command was accepted by Marlin (`xy trigger`, then `busy` reply).
+  **Historical transport evidence only; do not repeat it.** Later supervised
+  tests proved standalone raw `G28` drives the nozzle into the plate without the
+  required probe preparation. It is now blocked by the web control boundary.
 - OrcaSlicer using its OctoPrint-compatible `127.0.0.1:4470` endpoint uploaded
   a 7.5 MB G-code file. `ankerctl` connected to `192.168.2.2` over PPPP,
   completed all file blocks, requested the print start, and returned HTTP 200
@@ -406,14 +409,19 @@ Successfully sent print job
 POST /api/files/local HTTP/1.1" 200
 ```
 
-Remaining work for a durable fully-local end state:
+Historical remaining work at that point (completed/superseded later on
+2026-07-12 by the LaunchDaemons and default-deny design below):
 
 - Persist across reboots: Internet Sharing auto-start, `dnsmasq` + pf-anchor +
   mosquitto as launchd services.
 - Sever the rest of Anker: block Anker domains at the Mac (it is now the printer's
   router), and address the P2P/PPPP relay (camera), NTP, and firmware/OTA ties.
 
-#### Cloud block — defense-in-depth (implemented 2026-07-12)
+#### Cloud block — defense-in-depth (implemented, then superseded 2026-07-12)
+
+`SUPERSEDED`: the exact-IP rules in this subsection are retained as experiment
+history. They are not the current firewall design and must not be reinstalled;
+the default-deny egress allowlist in the next subsection replaced them.
 
 Because the Mac is the printer's router, Anker is blocked *there*, scoped to the
 printer (`192.168.2.2`) — the home router cannot target the printer (it's NAT'd
@@ -466,8 +474,9 @@ legitimate peers are on the hotspot subnet (broker, DNS, NTP, PPPP file transfer
 all on the Mac at `192.168.2.1`), so `anker_block` passes
 `192.168.2.2 → 192.168.2.0/24` and drops everything else off-subnet. This is
 immune to GA rotation and also kills OTA and connectivity checks in one rule.
-The printer's PPPP camera stays on the LAN subnet (unaffected); only its cloud
-WAN relay is dropped, forcing direct-LAN P2P. NTP is preserved by an `anker_dns`
+The printer's PPPP file-transfer/P2P path stays on the LAN subnet (unaffected);
+only its cloud WAN relay is dropped, forcing direct-LAN P2P. The M5C has no
+onboard camera. NTP is preserved by an `anker_dns`
 rdr that rewrites the printer's `:123` to a **local chrony** on the Mac (run with
 `-x` so it serves time without disciplining the Mac's own clock). `anker.com`
 was added to the dnsmasq blackhole for defense-in-depth.

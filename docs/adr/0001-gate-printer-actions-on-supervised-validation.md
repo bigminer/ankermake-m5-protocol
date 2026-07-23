@@ -1,0 +1,3 @@
+# Gate changed Printer actions on Supervised validation
+
+Changed Printer-action behavior remains unavailable in normal operation until Supervised validation establishes its physical result. The repository records validation status and evidence for the action contract and tested printer model/firmware; explicit local validation mode may expose changed behavior for supervised testing, after which unchanged validated behavior becomes normally available. Prior validation survives changes that preserve the observable action contract; this trades some development speed for human-observed evidence that code changes remain physically safe and effective.

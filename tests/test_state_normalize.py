@@ -58,6 +58,18 @@ class NormalizeTests(unittest.TestCase):
     def test_state_alternate_key(self):
         self.assertEqual(normalize({"commandType": 999, "machineStatus": 7}), {"state": "7"})
 
+    def test_printer_state_notice_uses_subtype_one_value(self):
+        self.assertEqual(
+            normalize({"commandType": 1000, "subType": 1, "value": 2}),
+            {"state": "2"},
+        )
+
+    def test_other_event_notice_subtypes_are_not_printer_state(self):
+        self.assertEqual(
+            normalize({"commandType": 1000, "subType": 2, "value": 2}),
+            {},
+        )
+
     def test_unhandled_notice_is_dropped(self):
         self.assertEqual(normalize({"commandType": 999, "foo": "bar"}), {})
 

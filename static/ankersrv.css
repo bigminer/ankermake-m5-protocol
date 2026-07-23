@@ -323,6 +323,10 @@ header .nav-item { flex: 0 0 auto; }
     box-shadow: var(--ring);
 }
 
+.temperature-picker-launch:not(:disabled) {
+    cursor: pointer;
+}
+
 .input-group-text {
     background: var(--surface-3);
     border-color: var(--border);
@@ -505,6 +509,7 @@ span.form-control {
     margin-top: 0.15rem;
 }
 .control-stat-value .text-body-secondary { color: var(--text-faint) !important; font-weight: 400; }
+.control-refresh { min-height: 2.25rem; padding-inline: 0.7rem; white-space: nowrap; }
 
 /* ---- Control tab: masonry layout (fixes uneven-column gaps) -------------- */
 

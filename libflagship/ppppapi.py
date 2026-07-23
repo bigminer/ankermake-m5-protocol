@@ -70,6 +70,32 @@ class FileUploadInfo:
             type=type
         )
 
+    @classmethod
+    def from_stream(cls, stream, filename, user_name, user_id, machine_id,
+                    type=0, blocksize=1024 * 32):
+        """Create upload metadata without holding the entire file in memory.
+
+        PPPP requires the size and MD5 before the first data frame.  The
+        request body is therefore read once to calculate that metadata, then
+        rewound so the caller can transfer it in bounded chunks.
+        """
+        stream.seek(0)
+        digest = hashlib.md5()
+        size = 0
+        while chunk := stream.read(blocksize):
+            digest.update(chunk)
+            size += len(chunk)
+        stream.seek(0)
+        return cls(
+            name=cls.sanitize_filename(os.path.basename(filename)),
+            size=size,
+            md5=digest.hexdigest(),
+            user_name=user_name,
+            user_id=user_id,
+            machine_id=machine_id,
+            type=type,
+        )
+
     def __str__(self):
         return f"{self.type},{self.name},{self.size},{self.md5},{self.user_name},{self.user_id},{self.machine_id}"
 

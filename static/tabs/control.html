@@ -3,11 +3,17 @@
     id="control"
     role="tabpanel"
     aria-labelledby="control-tab"
+    data-action-validation-mode="{{ 'true' if action_validation_mode else 'false' }}"
 >
     <div class="container fullscreen-emulate control-panel">
         <!-- Status strip -->
-        <div class="card mb-3">
-            <div class="card-header">Status</div>
+            <div class="card mb-3">
+                <div class="card-header d-flex align-items-center justify-content-between gap-2">
+                    <span>Status</span>
+                    <button class="btn btn-sm btn-outline-secondary control-refresh" id="control-refresh" type="button">
+                        {{ macro.bi_icon("arrow-clockwise") }} Refresh
+                    </button>
+                </div>
             <div class="card-body">
                 <div class="stat-strip">
                     <div>
@@ -36,7 +42,7 @@
                     </div>
                     <div>
                         <div class="control-stat-label">State</div>
-                        <div class="control-stat-value" id="control-printer-state">Unknown</div>
+                        <div class="control-stat-value" id="control-printer-state">Checking…</div>
                     </div>
                     <div>
                         <div class="control-stat-label">Speed</div>
@@ -84,6 +90,8 @@
                             </button>
                         </div>
                     </div>
+                    <p class="small mb-0 mt-3" id="print-action-status" aria-live="polite"></p>
+                    <p class="small text-body-secondary mb-0 mt-3">Available while a print is active.</p>
                 </div>
             </div>
 
@@ -107,7 +115,9 @@
                         <button class="btn btn-secondary jog-btn control-command" data-axis="Z" data-dir="1" type="button" disabled>Z+</button>
 
                         <button class="btn btn-secondary jog-btn control-command" data-axis="X" data-dir="-1" type="button" disabled>X-</button>
-                        <button class="btn btn-secondary control-command" id="jog-home" type="button" disabled title="Home all axes">
+                        <button class="btn btn-secondary" id="jog-home" type="button" disabled
+                                aria-label="Home all axes"
+                                title="Disabled: web homing does not safely engage the M5C nozzle probe">
                             {{ macro.bi_icon("house-fill") }}
                         </button>
                         <button class="btn btn-secondary jog-btn control-command" data-axis="X" data-dir="1" type="button" disabled>X+</button>
@@ -116,29 +126,50 @@
                         <button class="btn btn-secondary jog-btn control-command" data-axis="Y" data-dir="-1" type="button" disabled>Y-</button>
                         <button class="btn btn-secondary jog-btn control-command" data-axis="Z" data-dir="-1" type="button" disabled>Z-</button>
                     </div>
+                    <p class="small text-warning mb-0 mt-3">
+                        Home is disabled: web homing does not safely engage the M5C's nozzle probe.
+                    </p>
                 </div>
             </div>
 
             <div class="card control-card">
                 <div class="card-header">Temperatures</div>
                 <div class="card-body">
-                    <form class="mb-3" id="control-nozzle-form">
+                    <div class="mb-3" id="control-nozzle-form">
                         <label class="form-label" for="control-nozzle-input">Nozzle target</label>
                         <div class="input-group">
-                            <input type="number" class="form-control" min="0" max="300" id="control-nozzle-input" value="0" />
+                            <input
+                                type="text" class="form-control temperature-picker-launch control-command"
+                                id="control-nozzle-input" value="0" readonly inputmode="none"
+                                title="Nozzle target"
+                                data-bs-toggle="modal" data-bs-target="#popupModalInput"
+                                data-input-type="number" data-input-min="0" data-input-max="300"
+                                data-picker-step="5" data-input-icon-class="icon-hotend"
+                                data-input-unit="°C" data-clear-on-open="true" disabled
+                            />
                             <span class="input-group-text">°C</span>
-                            <button class="btn btn-primary control-command" type="submit" disabled>Set</button>
+                            <button class="btn btn-primary control-temperature-picker control-command" type="button"
+                                    data-picker-trigger="#control-nozzle-input" disabled>Choose</button>
                         </div>
-                    </form>
+                    </div>
 
-                    <form id="control-bed-form">
+                    <div id="control-bed-form">
                         <label class="form-label" for="control-bed-input">Bed target</label>
                         <div class="input-group">
-                            <input type="number" class="form-control" min="0" max="120" id="control-bed-input" value="0" />
+                            <input
+                                type="text" class="form-control temperature-picker-launch control-command"
+                                id="control-bed-input" value="0" readonly inputmode="none"
+                                title="Bed target"
+                                data-bs-toggle="modal" data-bs-target="#popupModalInput"
+                                data-input-type="number" data-input-min="0" data-input-max="100"
+                                data-picker-step="5" data-input-icon-class="icon-bed"
+                                data-input-unit="°C" data-clear-on-open="true" disabled
+                            />
                             <span class="input-group-text">°C</span>
-                            <button class="btn btn-primary control-command" type="submit" disabled>Set</button>
+                            <button class="btn btn-primary control-temperature-picker control-command" type="button"
+                                    data-picker-trigger="#control-bed-input" disabled>Choose</button>
                         </div>
-                    </form>
+                    </div>
                 </div>
             </div>
 
@@ -153,6 +184,60 @@
                     <button class="btn btn-secondary w-100 mt-3 control-command" id="fan-apply" type="button" disabled>
                         {{ macro.bi_icon("fan", "Set Fan") }}
                     </button>
+                </div>
+            </div>
+
+            <div class="card control-card">
+                <div class="card-header">Filament</div>
+                <div class="card-body">
+                    <p class="small text-body-secondary mb-3">
+                        Available only while idle and the nozzle is at least 170°C.
+                    </p>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-5">
+                            <label class="form-label small mb-1" for="filament-amount">Amount</label>
+                            <select class="form-select" id="filament-amount">
+                                <option value="1">1 mm</option>
+                                <option value="5" selected>5 mm</option>
+                                <option value="10">10 mm</option>
+                            </select>
+                        </div>
+                        <div class="col-7 d-grid gap-2">
+                            <button class="btn btn-secondary attended-control" id="filament-retract" type="button" disabled>
+                                {{ macro.bi_icon("arrow-bar-left", "Retract") }}
+                            </button>
+                            <button class="btn btn-primary attended-control" id="filament-extrude" type="button" disabled>
+                                {{ macro.bi_icon("arrow-bar-right", "Extrude") }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card control-card">
+                <div class="card-header">Live Z Adjust</div>
+                <div class="card-body">
+                    <p class="small text-body-secondary mb-3">
+                        Fine adjustment while idle. This is not saved as printer calibration.
+                    </p>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-5">
+                            <label class="form-label small mb-1" for="z-offset-step">Step</label>
+                            <select class="form-select" id="z-offset-step">
+                                <option value="0.01">0.01 mm</option>
+                                <option value="0.05" selected>0.05 mm</option>
+                                <option value="0.1">0.10 mm</option>
+                            </select>
+                        </div>
+                        <div class="col-7 d-grid gap-2">
+                            <button class="btn btn-secondary attended-control" id="z-offset-down" type="button" disabled>
+                                {{ macro.bi_icon("dash-lg", "Lower nozzle") }}
+                            </button>
+                            <button class="btn btn-secondary attended-control" id="z-offset-up" type="button" disabled>
+                                {{ macro.bi_icon("plus-lg", "Raise nozzle") }}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 

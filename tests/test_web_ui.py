@@ -7,8 +7,10 @@ from datetime import datetime
 from unittest import mock
 
 from cli.model import Account, Config, Printer
-from web import app, _require_token, ctrl_send_mqtt
+from web import app, _require_token, _state_updates, ctrl_send_mqtt, ctrl_submit_action
+from web.printer_actions import Pause
 from web.lib.service import RunState
+from web.printer_snapshot import PrinterSnapshots
 
 
 class FakeConfigManager:
@@ -88,6 +90,8 @@ class WebUiTestCase(unittest.TestCase):
         self.client = app.test_client()
         self.old_testing = app.config.get("TESTING")
         self.old_access_token = app.config.get("access_token")
+        self.old_slicer_token = app.config.get("slicer_token")
+        self.old_max_content_length = app.config.get("MAX_CONTENT_LENGTH")
         self.old_config = app.config.get("config")
         self.old_login = app.config.get("login")
         self.old_video_supported = app.config.get("video_supported")
@@ -95,6 +99,8 @@ class WebUiTestCase(unittest.TestCase):
         self.old_webcam_url = app.config.get("webcam_url")
         self.old_preprint_g36 = app.config.get("preprint_g36")
         self.old_svc = app.svc
+        self.old_printer_snapshots = getattr(app, "printer_snapshots", None)
+        self.old_printer_actions = getattr(app, "printer_actions", None)
 
         app.config["TESTING"] = True
         app.config["config"] = FakeConfigManager(make_config())
@@ -103,10 +109,14 @@ class WebUiTestCase(unittest.TestCase):
         app.config["printer_index"] = 0
         app.config["webcam_url"] = ""
         app.config["preprint_g36"] = False
+        app.config["slicer_token"] = ""
+        app.printer_snapshots = PrinterSnapshots(clock=lambda: 100.0)
 
     def tearDown(self):
         app.config["TESTING"] = self.old_testing
         app.config["access_token"] = self.old_access_token
+        app.config["slicer_token"] = self.old_slicer_token
+        app.config["MAX_CONTENT_LENGTH"] = self.old_max_content_length
         app.config["config"] = self.old_config
         app.config["login"] = self.old_login
         app.config["video_supported"] = self.old_video_supported
@@ -114,6 +124,8 @@ class WebUiTestCase(unittest.TestCase):
         app.config["webcam_url"] = self.old_webcam_url
         app.config["preprint_g36"] = self.old_preprint_g36
         app.svc = self.old_svc
+        app.printer_snapshots = self.old_printer_snapshots
+        app.printer_actions = self.old_printer_actions
 
     def test_root_without_token_is_available(self):
         app.config["access_token"] = ""
@@ -222,6 +234,39 @@ class WebUiTestCase(unittest.TestCase):
         self.assertEqual(resp.json, {})
         upload_file.assert_called_once()
 
+    def test_api_files_local_requires_key_when_remote(self):
+        app.config["slicer_token"] = "slicer-secret"
+
+        with mock.patch("web.util.upload_file_to_printer") as upload_file:
+            denied = self.client.post(
+                "/api/files/local",
+                data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "test.gcode")},
+                content_type="multipart/form-data",
+                environ_overrides={"REMOTE_ADDR": "192.0.2.10"},
+            )
+            allowed = self.client.post(
+                "/api/files/local",
+                data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "test.gcode")},
+                content_type="multipart/form-data",
+                headers={"X-Api-Key": "slicer-secret"},
+                environ_overrides={"REMOTE_ADDR": "192.0.2.10"},
+            )
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 200)
+        upload_file.assert_called_once()
+
+    def test_api_files_local_rejects_oversize_request(self):
+        app.config["MAX_CONTENT_LENGTH"] = 8
+
+        resp = self.client.post(
+            "/api/files/local",
+            data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "test.gcode")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(resp.status_code, 413)
+
     def test_status_reports_service_shape(self):
         app.svc = FakeServiceSet({
             "mqttqueue": FakeService(RunState.Running),
@@ -291,6 +336,56 @@ class WebUiTestCase(unittest.TestCase):
             result = _require_token()
 
         self.assertEqual(result[1], 401)
+
+    def test_ws_state_immediately_sends_the_server_owned_snapshot(self):
+        app.config["access_token"] = ""
+        app.printer_snapshots.observe(
+            "printer-0",
+            {"state": "printing", "print": {"name": "job.gcode"}},
+        )
+
+        @contextlib.contextmanager
+        def fake_borrow(name):
+            self.assertEqual(name, "mqttqueue")
+            yield object()
+
+        with mock.patch.object(app.svc, "borrow", fake_borrow):
+            payload = next(_state_updates())
+
+        self.assertEqual(payload["cursor"], 1)
+        self.assertEqual(payload["state"], "printing")
+        self.assertEqual(payload["print"]["name"], "job.gcode")
+        self.assertEqual(payload["facts"]["print.name"]["freshness"], "fresh")
+
+    def test_named_action_adapter_derives_printer_and_job_context_on_the_server(self):
+        app.config["printer_index"] = 0
+        submitted = []
+
+        class FakeActions:
+            def submit(self, request):
+                submitted.append(request)
+                return SimpleNamespace(to_dict=lambda: {
+                    "requestId": request.request_id,
+                    "status": "accepted",
+                })
+
+        from types import SimpleNamespace
+        app.printer_actions = FakeActions()
+        socket = FakeSocket([])
+
+        ctrl_submit_action(socket, {
+            "requestId": "pause-1",
+            "type": "pause",
+            "printerId": "attacker-chosen",
+            "userName": "attacker-chosen",
+            "filePath": "attacker-chosen.gcode",
+        })
+
+        self.assertEqual(len(submitted), 1)
+        self.assertEqual(submitted[0].request_id, "pause-1")
+        self.assertEqual(submitted[0].printer_id, "printer-0")
+        self.assertIsInstance(submitted[0].action, Pause)
+        self.assertEqual(json.loads(socket.sent[0])["action"]["status"], "accepted")
 
     def test_ws_ctrl_gcode_command_round_trip(self):
         app.config["access_token"] = ""
@@ -412,6 +507,67 @@ class WebUiTestCase(unittest.TestCase):
 
         fake_client.command.assert_called_once_with(message["mqtt"])
         self.assertEqual(fake_socket.sent, [])
+
+    def test_ws_ctrl_blocks_move_zero_before_transport(self):
+        fake_socket = FakeSocket([])
+        message = {
+            "mqtt": {"commandType": 0x0402, "value": 2},
+            "awaitResponse": False,
+        }
+
+        with mock.patch.object(app.svc, "borrow") as borrow:
+            ctrl_send_mqtt(fake_socket, message)
+
+        borrow.assert_not_called()
+        response = json.loads(fake_socket.sent[0])
+        self.assertEqual(response["commandType"], 0x0402)
+        self.assertIn("disabled", response["ankerctlError"])
+
+    def test_ws_ctrl_blocks_z_homing_but_allows_xy(self):
+        fake_client = mock.Mock()
+        fake_socket = FakeSocket([])
+
+        class FakeMqttService:
+            transport = fake_client
+
+        @contextlib.contextmanager
+        def fake_borrow(name):
+            self.assertEqual(name, "mqttqueue")
+            yield FakeMqttService()
+
+        blocked = (
+            "G28", "G28 Z", "G28 X Z", "G28 ; home",
+            "G28 X Y\nG28 Z", "N20 G28 Z",
+        )
+        with mock.patch.object(app.svc, "borrow", fake_borrow):
+            for command in blocked:
+                ctrl_send_mqtt(fake_socket, {
+                    "mqtt": {
+                        "commandType": 0x0413,
+                        "cmdData": command,
+                        "cmdLen": len(command),
+                    },
+                    "awaitResponse": False,
+                })
+            ctrl_send_mqtt(fake_socket, {
+                "mqtt": {
+                    "commandType": 0x0413,
+                    "cmdData": "G28 X Y",
+                    "cmdLen": 7,
+                },
+                "awaitResponse": False,
+            })
+
+        self.assertEqual(len(fake_socket.sent), len(blocked))
+        self.assertTrue(all(
+            "ankerctlError" in json.loads(payload)
+            for payload in fake_socket.sent
+        ))
+        fake_client.command.assert_called_once_with({
+            "commandType": 0x0413,
+            "cmdData": "G28 X Y",
+            "cmdLen": 7,
+        })
 
     def test_ws_ctrl_matching_reply_after_unrelated_reply(self):
         app.config["access_token"] = ""

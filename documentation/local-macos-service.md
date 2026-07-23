@@ -12,11 +12,11 @@ The paths and network names below describe the installation as of
 
 - Never place account tokens, MQTT credentials, the web access token, Flask
   secret key, or TLS private keys in source control or documentation.
-- The web UI is protected by `ANKERCTL_TOKEN`, but the OctoPrint-compatible
-  slicer endpoints remain unauthenticated so OrcaSlicer can upload jobs.
-- `ankerctl` listens on `0.0.0.0:4470`. Any device that can reach that port
-  can call the exempt upload endpoint and start a print. Restrict access with
-  the macOS firewall, network segmentation, or Tailscale ACLs.
+- The web UI is protected by `ANKERCTL_TOKEN`. Slicers on the same computer
+  can upload without a key; remote slicers must use `ANKERCTL_SLICER_TOKEN`
+  as their OctoPrint API key.
+- `ankerctl` listens on `0.0.0.0:4470`. Configure a slicer API key and keep
+  firewall, network-segmentation, or Tailscale ACL protections in place.
 - MediaMTX listens on all interfaces. Treat its publisher URL as a control
   endpoint: anyone who can reach it can replace the `ipadcam` stream.
 - Do not enable the experimental `G36` pre-print hook. See
@@ -153,9 +153,14 @@ Environment variables:
 | Variable | Purpose | Current policy |
 | --- | --- | --- |
 | `ANKERCTL_TOKEN` | Shared web UI login token | Required; value kept only in the plist |
+| `ANKERCTL_SLICER_TOKEN` | Remote slicer upload API key | Required when Orca runs off-host; value kept only in the plist |
 | `ANKERCTL_SECRET_KEY` | Stable Flask session signing key | Required; random secret kept only in the plist |
+| `ANKERCTL_MAX_UPLOAD_BYTES` | Largest accepted slicer upload | Defaults to 512 MiB; lower it if your profiles allow |
 | `ANKERCTL_PREPRINT_G36` | Experimental pre-upload preparation hook | Must remain `false` |
 | `ANKERCTL_PREPRINT_COMMAND_TIMEOUT` | Experimental hook timeout | Present but unused while hook is disabled |
+| `ANKERCTL_ACTION_VALIDATION_MODE` | Enables named Pause/Resume/Stop actions | Must remain `false` outside an attended validation |
+| `ANKERCTL_ACTION_CONFIRMATION_TIMEOUT` | Time allowed for telemetry confirmation | Defaults to 30 seconds |
+| `ANKERCTL_ACTION_JOURNAL_PATH` | Durable action-outcome journal | Optional; defaults to the user's local state directory |
 | `ANKERCTL_WEBCAM_URL` | Optional environment-level webcam URL | Not required when URL is saved in `default.json` |
 
 Generate new secrets rather than reusing documented examples:
@@ -240,26 +245,62 @@ The local web UI adds the following features to upstream `ankerctl`:
 - Embedded WebRTC camera viewer.
 - Control tab showing state, progress, temperatures, speed and layer.
 - Object preview image when supplied by printer telemetry.
-- Fan, jog, home, temperature and raw G-code controls.
+- Fan, jog, temperature and raw G-code controls, plus a permanently disabled
+  Home placeholder that documents the standalone-homing hazard.
 
 Authentication behavior:
 
 - `/login` accepts `ANKERCTL_TOKEN` and creates a Flask session.
 - `ANKERCTL_SECRET_KEY` keeps sessions valid across restarts.
-- `/api/version`, `/api/files/local`, `/login`, and static assets are exempt.
+- `/api/version`, `/login`, and static assets are exempt. `/api/files/local`
+  permits unauthenticated loopback uploads only; non-loopback requests must
+  send `ANKERCTL_SLICER_TOKEN` as `X-Api-Key`.
 - WebSocket handshakes reject unauthenticated clients with HTTP 401.
 
-The upload exemption is required by the current Orca integration, but it is
-also the main network security risk.
+The connection test only needs the exempt version endpoint. A remote upload
+requires the configured slicer API key.
 
-### Control tab warning
+### Control tab homing safety
 
-Raw G-code, fan, jog, home and temperature controls use the known
+Raw G-code, fan, jog and temperature controls use the known
 `GCODE_COMMAND` MQTT primitive.
 
-The pause, resume and stop button values are best guesses and have not been
-validated against this M5C firmware. Do not rely on those buttons for safety.
-Use the printer/app controls or physical power switch when necessary.
+The Control-tab Home button is disabled. Two supervised tests on this M5C
+drove the nozzle into the build plate without the expected probe detection:
+a direct standalone `G28`, and eufyMake's app-level `MOVE_ZERO` operation
+(`commandType: 1026`, `value: 2`). The operator cut power during both tests.
+
+The browser and `/ws/ctrl` server endpoint reject bare `G28`, any `G28 Z`, and
+`MOVE_ZERO`, so the safety guard cannot be bypassed by crafting a websocket
+message. Explicit X/Y-only `G28 X Y` remains available for diagnostics, but it
+never establishes a Z home position. Full web homing must not be re-enabled
+until the missing nozzle-probe preparation sequence is understood and tested.
+
+Jogging sends `G91`, the bounded `G1` move, and `G90` as three separate MQTT
+messages. Marlin treats a semicolon as the beginning of a comment, so combining
+those commands on one line would leave the printer in relative-coordinate mode.
+This describes the request format, not guaranteed motion: during supervised
+2026-07-19 tests, unhomed X/Y requests replied `echo:Home X/Y` and did not move.
+Earlier Z requests did move. The combined live jog fixture needs axis-specific
+revalidation and must not be cited as proof that X/Y moved.
+
+Pause and resume use the job-aware `PRINT_CONTROL` command with the active
+file path. Stop sends the captured minimal payload
+`{"commandType": 1008, "value": 0}` plus `M2024`: the former is intended to
+cancel the communication-module job while the latter clears motion already
+buffered by the MCU. Do not add Pause/Resume's `userName` or `filePath` fields
+to Stop; a 2026-07-13 regression did so and failed to cancel a live job while
+`M2024` cooled the nozzle.
+
+The restored minimal Stop payload also failed against an Orca-started job on
+2026-07-20: both messages received replies and the heaters cooled, but progress
+and layer telemetry continued until the operator used the physical button.
+Pause failed on that job as well. Pause/Resume now require the trusted identity
+recorded at upload. Stop deliberately does not: it remains a global protective
+override with the minimal `1008/value=0` payload. Treat both controls as unsafe
+for live use until the new server-owned confirmation path is revalidated. A
+reply is not proof of a pause/stop transition; the physical controls remain the
+safety backstop.
 
 ## OrcaSlicer configuration
 
@@ -267,7 +308,8 @@ Configure the printer connection as an OctoPrint-compatible host:
 
 ```text
 Host: http://127.0.0.1:4470
-API key: not required
+API key: leave empty only when Orca runs on the Mac; otherwise use
+`ANKERCTL_SLICER_TOKEN`
 Operation: Send and Print
 ```
 
@@ -306,8 +348,10 @@ G-code file keeps the old commands.
 3. `ankerctl` reads the file and opens a PPPP file-transfer session.
 4. The file is transferred to the M5C.
 5. The file-transfer end message asks the printer to start the job.
-6. MQTT telemetry reports job name, progress, remaining time, temperatures,
-   speed, and layer.
+6. While the printer remains associated with the hotspot and connected to the
+   broker, MQTT telemetry reports job name, progress, remaining time,
+   temperatures, speed, and layer. A physical print can continue if that MQTT
+   session drops; missing telemetry is not evidence that the job stopped.
 
 Successful log sequence:
 
@@ -530,13 +574,23 @@ together.
 
 2. Confirm the G-code contains the original `G28` block.
 3. Check the three expected upload log messages.
-4. Check PPPP state through `/api/ankerctl/status`.
-5. Power-cycle the printer if it does not reconnect after a failed command.
-6. Resend only after PPPP is `Running`.
+4. Check PPPP state through `/api/ankerctl/status`, but do not treat `Running`
+   as proof that the printer is present.
+5. Check the broker log for current printer PUBLISHes and check the hotspot
+   neighbor/lease. If the printer client disconnected, an `ankerctl` restart
+   will not force it back onto Wi-Fi.
+6. Improve the hotspot radio path or reassociate the printer. Power-cycle only
+   with a present operator and explicit authorization.
+7. Resend only after PPPP is `Running` **and** fresh printer MQTT notices are
+   visible.
 
 ### PPPP is `Starting` after a printer reboot
 
-The printer may need 30–60 seconds to rejoin the `M5C-Local` hotspot.
+The printer may need 30–60 seconds to rejoin the `M5C-Local` hotspot. That is a
+normal grace period, not a guarantee: on 2026-07-19 the printer remained absent
+with no ARP entry after its broker client disconnected. If the lease never
+answers, diagnose hotspot signal/association rather than waiting indefinitely
+or repeatedly restarting `ankerctl`.
 
 ```sh
 ping -c 2 192.168.2.2
@@ -560,6 +614,27 @@ The current service aborts a transfer when a 32 KiB block is not acknowledged
 within 15 seconds. Wait for PPPP to return to `Running`, then resend the
 complete file. Partial transfers are not resumable.
 
+### MQTT observation stops while the printer keeps working
+
+Do not assume the decoder or web service failed. Locate the boundary:
+
+1. Inspect the local Mosquitto log for the printer client and fresh
+   `/phone/maker/...` PUBLISHes.
+2. If printer PUBLISHes continue but `/ws/state` is stale, restart `ankerctl`
+   and recheck. This recovered the 2026-07-15 service-thread wedge.
+3. If the broker logged the printer client disconnecting and no PUBLISHes
+   follow, check the hotspot lease with ARP/ping and run the privileged
+   `deploy/local-broker/verify.sh`.
+4. If the local stack passes but the printer has no neighbor entry, treat the
+   direct Mac-hotspot ↔ printer radio link as the leading fault. An `ankerctl`
+   restart cannot recover a remote Wi-Fi client.
+
+On 2026-07-19 this exact second branch occurred: Mosquitto logged the printer
+client disconnecting with `Host is down`, the printer made no observed MQTT
+reconnect attempt, and a physically running print finished without further
+telemetry. Weak hotspot signal is `SUPPORTED` but needs a closer-placement live
+revalidation; a changed printer lease is not fully excluded.
+
 ### MQTT works but PPPP does not
 
 In the local-broker topology, MQTT terminates on the Mac, while PPPP file
@@ -578,8 +653,8 @@ Then update/re-import configuration if the cached address is stale.
 ### Web UI redirects to login
 
 This is expected when `ANKERCTL_TOKEN` is set. Use the configured access
-token. Do not remove authentication merely to fix slicer uploads; the slicer
-endpoints are already exempt.
+token. Do not remove authentication merely to fix slicer uploads; configure
+`ANKERCTL_SLICER_TOKEN` as the slicer's API key for remote uploads.
 
 ### Orca cannot test the host
 
@@ -603,7 +678,8 @@ Recovery:
 
 1. Do not send another print.
 2. Disable the experimental hook if enabled.
-3. Use the printer's physical power switch.
+3. Confirm an operator is physically present and explicitly authorizes a power
+   cycle, then use the printer's physical power switch.
 4. Leave it off for at least 10 seconds.
 5. Power it on.
 6. Verify both heater targets report 0°C.
@@ -745,8 +821,8 @@ the local changes.
 
 Before printing:
 
-- Printer is online and reachable.
-- PPPP and MQTT services are `Running`.
+- Printer has a current hotspot neighbor/reply and fresh broker PUBLISHes.
+- PPPP and MQTT services are `Running`; service state alone is insufficient.
 - Orca start G-code contains `G28`, not `G36`.
 - `ANKERCTL_PREPRINT_G36` is `false`.
 - Build plate and toolhead path are clear.

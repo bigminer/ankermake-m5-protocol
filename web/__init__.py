@@ -27,8 +27,10 @@ Services:
     - config: Handles configuration manipulation for ankerctl
 """
 import hmac
+import ipaddress
 import os
 import json
+import re
 import time
 import logging as log
 
@@ -43,6 +45,15 @@ from user_agents import parse as user_agent_parse
 from libflagship import ROOT_DIR
 
 from web.lib.service import ServiceManager, RunState, ServiceStoppedError
+from web.printer_snapshot import CursorExpired, PrinterSnapshots, Watch
+from web.printer_actions import (
+    ActionRequest,
+    MqttActionProtocol,
+    Pause,
+    PrinterActions,
+    Resume,
+    Stop,
+)
 
 import web.config
 import web.platform
@@ -62,8 +73,20 @@ app.config.from_prefixed_env()
 
 # Optional shared-secret access token. When set, the human web UI requires
 # login; when empty, auth is disabled (preserving previous behaviour). The
-# slicer/OctoPrint upload endpoints are always exempt (see _require_token).
+# slicer upload endpoint has its own remote-access check (see
+# _require_slicer_token).
 app.config["access_token"] = os.environ.get("ANKERCTL_TOKEN", "")
+
+# A distinct key for the OctoPrint-compatible upload API.  Local slicers can
+# continue to use loopback without a key; remote upload requests must present
+# this key in X-Api-Key.
+app.config["slicer_token"] = os.environ.get("ANKERCTL_SLICER_TOKEN", "")
+app.config["MAX_CONTENT_LENGTH"] = int(
+    os.environ.get("ANKERCTL_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024))
+)
+# A process-start version keeps mobile browsers from reusing stale UI assets
+# after the local web service is restarted.
+app.config["static_version"] = str(time.time_ns())
 
 # Optional external webcam stream URL (e.g. MJPEG from a phone/USB cam),
 # embedded on the Control tab. Empty = hidden.
@@ -78,10 +101,27 @@ app.config["preprint_g36"] = os.environ.get(
 app.config["preprint_command_timeout"] = int(
     os.environ.get("ANKERCTL_PREPRINT_COMMAND_TIMEOUT", "300")
 )
+app.config["action_validation_mode"] = os.environ.get(
+    "ANKERCTL_ACTION_VALIDATION_MODE", ""
+).lower() in {"1", "true", "yes", "on"}
+app.config["action_confirmation_timeout"] = float(
+    os.environ.get("ANKERCTL_ACTION_CONFIRMATION_TIMEOUT", "30")
+)
+app.config["action_journal_path"] = os.environ.get(
+    "ANKERCTL_ACTION_JOURNAL_PATH",
+    os.path.join(os.path.expanduser("~"), ".local", "state", "ankerctl", "actions.jsonl"),
+)
 
 app.svc = ServiceManager()
+app.printer_snapshots = PrinterSnapshots()
+app.printer_actions = None
 
 sock = Sock(app)
+
+
+@app.context_processor
+def static_asset_version():
+    return {"static_version": app.config["static_version"]}
 
 
 # Paths always reachable without a login token: the OctoPrint upload API used
@@ -116,11 +156,29 @@ def _auth_safe_redirect_target(target):
     return target
 
 
+def _request_is_loopback():
+    try:
+        return ipaddress.ip_address(request.remote_addr).is_loopback
+    except (TypeError, ValueError):
+        return False
+
+
+def _require_slicer_token():
+    """Protect remote print-start uploads while retaining local compatibility."""
+    if _request_is_loopback():
+        return
+
+    required = app.config.get("slicer_token")
+    supplied = request.headers.get("X-Api-Key", "")
+    if not required or not hmac.compare_digest(supplied, required):
+        return "Slicer API key required for non-loopback uploads", 403
+
+
 @app.before_request
 def _require_token():
     """
-    Gate the web UI behind a shared token when ANKERCTL_TOKEN is set. Slicer
-    upload endpoints stay open so 'Send and Print' keeps working without auth.
+    Gate the web UI behind a shared token when ANKERCTL_TOKEN is set. The
+    slicer endpoint has separate loopback/API-key access control.
     """
     required = app.config.get("access_token")
     if not required:
@@ -174,6 +232,27 @@ PRINTERS_WITHOUT_CAMERA = ["V8110"]
 
 
 CTRL_MQTT_REPLY_TIMEOUT = 10
+_GCODE_COMMAND = 0x0413
+_MOVE_ZERO = 0x0402
+
+
+def _unsafe_web_homing(mqtt):
+    """Return whether a browser MQTT payload could initiate unsafe Z homing."""
+    command_type = mqtt.get("commandType")
+    if command_type == _MOVE_ZERO:
+        return True
+    if command_type != _GCODE_COMMAND:
+        return False
+
+    for line in re.split(r"[\r\n]+", str(mqtt.get("cmdData", ""))):
+        command = line.split(";", 1)[0].strip().upper()
+        command = re.sub(r"^N\d+\s*", "", command)
+        if not re.match(r"^G28(?:\s|$)", command):
+            continue
+        axes = re.findall(r"[XYZ]", command[3:])
+        if not axes or "Z" in axes:
+            return True
+    return False
 
 
 def ctrl_send_mqtt(sock, msg):
@@ -184,16 +263,30 @@ def ctrl_send_mqtt(sock, msg):
     network loop (which is not thread-safe), and messages arriving while we
     wait still reach every other subscriber.
     """
-    command_type = msg["mqtt"]["commandType"]
+    mqtt = msg["mqtt"]
+    command_type = mqtt["commandType"]
+
+    if _unsafe_web_homing(mqtt):
+        response = {
+            "commandType": command_type,
+            "ankerctlError": (
+                "Web Z homing is disabled because it did not safely engage "
+                "the M5C nozzle probe"
+            ),
+        }
+        if "requestId" in msg:
+            response["requestId"] = msg["requestId"]
+        sock.send(json.dumps(response))
+        return
 
     with app.svc.borrow("mqttqueue") as mq:
         if not msg.get("awaitResponse"):
-            mq.transport.command(msg["mqtt"])
+            mq.transport.command(mqtt)
             return
 
         replies = Queue()
         with mq.tap(replies.put):
-            mq.transport.command(msg["mqtt"])
+            mq.transport.command(mqtt)
 
             reply = None
             deadline = time.monotonic() + CTRL_MQTT_REPLY_TIMEOUT
@@ -209,10 +302,36 @@ def ctrl_send_mqtt(sock, msg):
                     reply = obj
                     break
 
-        sock.send(json.dumps({
+        response = {
             "commandType": command_type,
             "mqttReply": reply,
-        }))
+        }
+        # Preserve a browser-side correlation ID when supplied.  This lets
+        # benign status probes be distinguished from terminal commands.
+        if "requestId" in msg:
+            response["requestId"] = msg["requestId"]
+        sock.send(json.dumps(response))
+
+
+def ctrl_submit_action(sock, message):
+    """Translate a trusted browser action name; ignore caller-supplied context."""
+    if app.printer_actions is None:
+        sock.send(json.dumps({"actionError": "printer_actions_unavailable"}))
+        return
+
+    action_type = str(message.get("type", "")).lower()
+    action = {"pause": Pause, "resume": Resume, "stop": Stop}.get(action_type)
+    request_id = str(message.get("requestId", "")).strip()
+    if action is None or not request_id:
+        sock.send(json.dumps({"actionError": "invalid_action_request"}))
+        return
+
+    outcome = app.printer_actions.submit(ActionRequest(
+        request_id=request_id,
+        printer_id=f"printer-{app.config['printer_index']}",
+        action=action(),
+    ))
+    sock.send(json.dumps({"action": outcome.to_dict()}))
 
 
 @sock.route("/ws/mqtt")
@@ -240,10 +359,25 @@ def state(sock):
         return
     if not app.config["login"]:
         return
-    for data in app.svc.stream("mqttqueue"):
-        norm = web.service.state.normalize(data)
-        if norm:
-            sock.send(json.dumps(norm))
+    cursor = request.args.get("cursor", type=int)
+    try:
+        for snapshot in _state_updates(cursor):
+            sock.send(json.dumps(snapshot))
+    except CursorExpired as error:
+        sock.send(json.dumps({
+            "snapshotError": "cursor_expired",
+            "oldestCursor": error.oldest_cursor,
+            "currentCursor": error.current_cursor,
+        }))
+
+
+def _state_updates(cursor=None):
+    """Yield selected-printer snapshots while keeping its MQTT source active."""
+    printer_id = f"printer-{app.config['printer_index']}"
+    watcher = app.printer_snapshots.watch(Watch(printer_id, cursor))
+    with app.svc.borrow("mqttqueue"):
+        for snapshot in watcher:
+            yield snapshot.to_dict()
 
 
 @sock.route("/ws/video")
@@ -311,6 +445,9 @@ def ctrl(sock):
 
         if "mqtt" in msg:
             ctrl_send_mqtt(sock, msg)
+
+        if "action" in msg:
+            ctrl_submit_action(sock, msg["action"])
 
         if "light" in msg:
             with app.svc.borrow("videoqueue") as vq:
@@ -387,6 +524,8 @@ def app_root():
             country_codes=json.dumps(cli.countrycodes.country_codes),
             current_country=country,
             webcam_url=webcam_url,
+            slicer_token_configured=bool(app.config["slicer_token"]),
+            action_validation_mode=bool(app.config["action_validation_mode"]),
             printer=printer
         )
 
@@ -598,6 +737,10 @@ def app_api_files_local():
     Returns:
         A dictionary containing file details
     """
+    auth_error = _require_slicer_token()
+    if auth_error:
+        return auth_error
+
     no_act = not cli.util.parse_http_bool(request.form["print"])
 
     if no_act:
@@ -656,11 +799,22 @@ def app_api_ankerctl_status() -> dict:
 
 
 def register_services(app):
+    with app.config["config"].open() as cfg:
+        for index, _printer in enumerate(cfg.printers):
+            app.printer_snapshots.ensure(f"printer-{index}")
     app.svc.register("pppp", web.service.pppp.PPPPService())
     if app.config["video_supported"]:
         app.svc.register("videoqueue", web.service.video.VideoQueue())
     app.svc.register("mqttqueue", web.service.mqtt.MqttQueue())
     app.svc.register("filetransfer", web.service.filetransfer.FileTransferService())
+    if app.printer_actions is None:
+        app.printer_actions = PrinterActions(
+            snapshots=app.printer_snapshots,
+            protocol=MqttActionProtocol(app),
+            journal_path=app.config["action_journal_path"],
+            validation_mode=app.config["action_validation_mode"],
+            confirmation_timeout=app.config["action_confirmation_timeout"],
+        )
 
 
 def webserver(config, printer_index, host, port, insecure=False, **kwargs):

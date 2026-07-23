@@ -1,5 +1,13 @@
 # Prompt — Can the AnkerMake M5C be redirected to a local MQTT broker?
 
+> **ARCHIVED PLAN — DO NOT EXECUTE AS A CURRENT RUNBOOK.** This document records
+> the pre-implementation investigation prompt from 2026-07-11. The local-broker
+> redirect was subsequently proven and implemented with a Mac-hosted printer
+> hotspot, local Mosquitto/DNS/NTP, and default-deny egress. Its LAN topology,
+> “remaining unknowns,” and rollback language are historical. Use
+> [`local-macos-service.md`](local-macos-service.md) for operations and
+> [`printer-findings.md`](printer-findings.md) for current confidence/status.
+
 > Self-contained brief for any coding agent (Codex, Claude, or other) with shell
 > access to the Mac mini and this repo checked out. It assumes no
 > harness-specific behavior; everything needed is stated here or in the
