@@ -1,27 +1,48 @@
 # Session handoff
 
-Last updated: 2026-07-20
+Last updated: 2026-07-23
+
+## Repository identity and GitHub targeting
+
+- The repository for this work is
+  [`bigminer/ankermake-m5-protocol`](https://github.com/bigminer/ankermake-m5-protocol).
+  Its Git remote is `origin`, and local `main` tracks `origin/main`.
+- Unless a full repository URL says otherwise, every issue, pull request,
+  branch, and `#N` reference in this handoff belongs to the `bigminer`
+  repository.
+- The Git remote named `upstream` currently points to
+  `anselor/ankermake-m5-protocol`. It is an external repository reference, not
+  the working repository or the default destination for merges and pushes.
+- `anselor/ankermake-m5-protocol#15` is an external pull request sourced from
+  `bigminer:local-control`. It is not “PR #15” in the working repository, and
+  the `bigminer` account currently has read-only access to that external
+  repository.
+- [`bigminer/ankermake-m5-protocol#15`](https://github.com/bigminer/ankermake-m5-protocol/issues/15)
+  is the open **issue** “Supervised validation: thermal and fan actions”; there
+  is no pull request #15 in the working repository.
 
 ## Current repository state
 
-- Working branch: `local-control`
-- Remote branch: `origin/local-control`
-- Upstream draft PR: [anselor/ankermake-m5-protocol#15](https://github.com/anselor/ankermake-m5-protocol/pull/15)
-- Parent design issue: [bigminer/ankermake-m5-protocol#6](https://github.com/bigminer/ankermake-m5-protocol/issues/6)
-- The completed implementation and session-closeout history is pushed to
-  `origin/local-control`; the existing upstream draft PR tracks that branch.
+- Working branch: `issue-10-thermal-fan-actions`, based on `local-control`.
+- The Issue 10 implementation and its 2026-07-23 attended validation evidence
+  are local and uncommitted. No remote branch or pull request exists yet for
+  this work.
+- Issue 10 now has typed nozzle-target, bed-target, heater-off, and fan actions;
+  server-owned validation, freshness, supersession, confirmation, journaling,
+  and contract gating; validation-mode browser integration; and deterministic
+  offline/browser coverage.
+- The attended thermal/fan run confirmed heater target telemetry,
+  same-resource supersession, independent nozzle/bed coordination, physical
+  fan on/off, and Protective heater-off from stale state. Issue 15 remains open
+  because the M5C has no numeric temperature display and exposes no fan-state
+  telemetry.
 - The macOS web service is running the local code. Named-action validation mode
-  was returned to `false`; the new Pause/Resume/Stop path is not enabled for
-  normal use.
-- Final observed printer state before shutdown: state 0, no active job, nozzle
-  target 0, bed target 0. The synthetic upload attempts caused beeps but no
-  active job, heating, homing, extrusion, or observed motion. The operator then
-  powered the printer off. A subsequent 16-second read-only check saw zero new
-  printer broker publishes and no response to three pings. No disconnect line
-  arrived during that sample, so power-off is confirmed by the operator report
-  plus network absence, not by a captured disconnect event.
-- This session is closed with no active printer work. Always obtain new
-  current-session operator confirmation before any later physical action.
+  was returned to `false`. Final observed printer state was state 0, nozzle
+  target 0, and bed target 0.
+- Current checks: 98 offline tests passed with 8 skipped; 27 browser tests
+  passed; JavaScript syntax, `git diff --check`, and the secret sweep passed.
+- There is no active printer action. Always obtain new current-session operator
+  confirmation before any later physical action.
 
 The worktree contains local user state that must not be modified, staged, or
 committed without explicit instruction:
@@ -30,13 +51,12 @@ committed without explicit instruction:
 - `.playwright-mcp/` is an untracked user/browser artifact directory.
 
 The Chrony PID-file repair and its documentation were committed in `261f8ce`.
-Do not stage `.env` or `.playwright-mcp/`. Any documentation changes below are
-the intended scope of the current live follow-up.
+Do not stage `.env` or `.playwright-mcp/`.
 
-The current project work completed the issue #7 server-owned snapshot
-foundation and the issue #8/#11 named Stop/Pause/Resume action path. Those
-three implementation issues are closed. The action path remains disabled by
-default and still needs supervised live validation in #9 and #16.
+The project previously completed the issue #7 server-owned snapshot foundation
+and the issue #8/#11 named Stop/Pause/Resume action path. Those three
+implementation issues are closed. That action path remains disabled by default
+and still needs supervised live validation in #9 and #16.
 
 An attended follow-up found and fixed two additional preflight gaps: normalized
 state omitted the real 1000/subType 1 `value`, and PPPP file transfer did not
@@ -47,8 +67,8 @@ the local validation-mode setting was returned to `false`.
 
 ## Session closeout and GitHub disposition
 
-This effort is deliberately done for now. There is no active monitoring,
-validation, or printer action to resume automatically.
+There is no active monitoring, validation, or printer action to resume
+automatically. Issue 10 implementation work is pending review and publication.
 
 | Issue | Final session disposition |
 | --- | --- |
@@ -57,12 +77,15 @@ validation, or printer action to resume automatically.
 | #7 — server-owned Printer snapshot | Closed completed |
 | #8 — Protective Stop tracer bullet | Closed completed for offline implementation; #9 retains live validation |
 | #9 — supervised Protective Stop | Open; synthetic attempt was invalid and no Stop was sent |
+| #10 — thermal and fan action migration | Implementation complete locally with passing offline/browser tests; not committed or published |
 | #11 — Pause/Resume migration | Closed completed for offline implementation; #16 retains live validation |
+| #15 — supervised thermal/fan validation | Open; bounded live behavior recorded, but numeric human heater observation and fan telemetry are unavailable |
 | #16 — supervised Pause/Resume | Open; synthetic attempt was invalid and neither action was sent |
 
-Issues #10 and #12-#19 remain open future slices under #6. No claim is made
-that the whole parent design is complete. GitHub follow-up comments record that
-the completed session history was published to `origin/local-control`.
+Issues #12-#19 remain open slices under #6; #15 has the partial evidence noted
+above. No claim is made that the whole parent design is complete. Earlier
+session history was published to `origin/local-control`; the current Issue 10
+work has not been published.
 
 ## Mandatory safety rules
 
