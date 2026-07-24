@@ -1,6 +1,6 @@
 # Session handoff
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
 ## Repository identity and GitHub targeting
 
@@ -47,12 +47,32 @@ Last updated: 2026-07-23
   target 0, and bed target 0.
 - Current checks: 98 offline tests passed with 8 skipped; 27 browser tests
   passed; JavaScript syntax, `git diff --check`, and the secret sweep passed.
+  Draft PR #21 is clean and mergeable, and all of its GitHub checks pass.
 - Origin branch cleanup removed `local-control`, `master`,
   `exiles-1.1-rebased`, `pyinstaller`, and `treitmayr_mqtt-commands` after
   verifying they were merged or had no unique patch content. The remaining
   legacy branches were retained because they still contain unique commits.
-- There is no active printer action. Always obtain new current-session operator
-  confirmation before any later physical action.
+- The post-PR-#20 `main` workflow built and published
+  `ghcr.io/bigminer/ankermake-m5-protocol:latest`, but its final legacy Release
+  step failed because it accepts semantic-version tag refs and was incorrectly
+  invoked for `refs/heads/main`. This is a CI release-condition defect, not a
+  code, test, secret-sweep, or container-build failure.
+
+## Current printer state
+
+- On 2026-07-24 the operator reported that the printer is online and that they
+  are physically present.
+- A read-only `APP_QUERY_STATUS` request returned fresh state 0, nozzle
+  22.00C/target 0, and bed 23.30C/target 0. This confirms current reachability,
+  idle state, and zero heater targets.
+- Named-action validation mode is `false`. The MQTT, PPPP, and file-transfer
+  services were stopped before the observation because they are lazy; the
+  read-only state websocket borrowed MQTT and obtained fresh printer telemetry.
+- There is no active printer action. Operator presence alone is not clearance
+  for motion, heating, fan, print, pause/resume, or stop. Before any such action,
+  obtain fresh confirmation that the bed and toolhead path are clear, the
+  filament path is safe when relevant, and physical power is immediately
+  accessible.
 
 The worktree contains local user state that must not be modified, staged, or
 committed without explicit instruction:
@@ -114,7 +134,8 @@ configuration: it contains authentication material. Run
 
 ## Session scope and completed work
 
-The branch and PR contain a broad local-control/web-dashboard effort:
+The history merged into `main` through PR #20 contains the broad
+local-control/web-dashboard effort:
 
 - Token-protected remote web access and slicer access controls.
 - OrcaSlicer/local macOS service integration.
@@ -263,7 +284,9 @@ UI heartbeat interval. The browser was sending `M105` at a fixed ten-second
 cadence even while the printer already published telemetry every few seconds.
 
 This was wasteful and a plausible stress multiplier, though it is not proven to
-have caused the radio disconnect. The uncommitted fix in `static/ankersrv.js`:
+have caused the radio disconnect. The fix, originally uncommitted during this
+observation and now merged into `main` through PR #20, changes
+`static/ankersrv.js` as follows:
 
 - Treats recent `/ws/state` telemetry as stronger liveness evidence than a new
   `M105`.
@@ -277,7 +300,7 @@ is suppressed, then proves probing resumes after the stale threshold. This
 mitigation reduces avoidable traffic during prints; it cannot recover an MQTT
 client that has already fallen off the hotspot.
 
-### Validation for the uncommitted mitigation
+### Validation for the heartbeat mitigation
 
 Completed after the change:
 

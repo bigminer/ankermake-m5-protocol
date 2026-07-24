@@ -67,15 +67,22 @@ G-code file.
 | MediaMTX log | `/Users/you/mediamtx/mediamtx.log` | Publisher, viewer and packet-loss events |
 | Orca M5C preset | `/Users/you/Library/Application Support/OrcaSlicer/user/default/machine/Anker M5C.json` | Printer host and start G-code |
 
-Snapshot versions:
+Snapshot versions and repository state:
 
-- `ankerctl` base commit: `88131a5`, plus local uncommitted modifications.
+- Canonical repository: `bigminer/ankermake-m5-protocol`; `main` includes the
+  completed local-control history through PR #20.
+- The local service currently runs the `issue-10-thermal-fan-actions` checkout,
+  published as draft PR #21. That branch is based directly on current `main`;
+  all PR checks pass, but the named thermal/fan path remains gated pending the
+  evidence disposition in issue #15.
 - Python: 3.12.13.
 - OrcaSlicer: 2.4.1.
 - MediaMTX: 1.19.2.
 - Tailscale CLI: 1.96.4. The system extension was observed at 1.98.5; align
   these versions during the next Tailscale upgrade.
 - Printer firmware observed through MQTT: V3.1.56.
+- Read-only status on 2026-07-24 confirmed the printer online in state 0, with
+  nozzle and bed targets both 0 and validation mode disabled.
 
 ## Network endpoints
 

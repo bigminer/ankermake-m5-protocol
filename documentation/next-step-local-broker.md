@@ -7,6 +7,9 @@
 > “remaining unknowns,” and rollback language are historical. Use
 > [`local-macos-service.md`](local-macos-service.md) for operations and
 > [`printer-findings.md`](printer-findings.md) for current confidence/status.
+> The former `local-control` branch was fully merged into `main` through PR #20
+> and deleted on 2026-07-23. If work is derived from this historical plan,
+> create a scoped feature branch from current `main`.
 
 > Self-contained brief for any coding agent (Codex, Claude, or other) with shell
 > access to the Mac mini and this repo checked out. It assumes no
@@ -14,8 +17,10 @@
 > referenced files.
 
 ## Context (read first)
-You are continuing the "local-control" effort in the `ankermake-m5-protocol`
-repo, branch `local-control`. Before doing anything, read:
+You are reviewing the historical "local-control" effort in the
+`ankermake-m5-protocol` repository. The implementation now lives on `main`;
+the former `local-control` branch no longer exists. Before doing anything,
+read:
 - `documentation/local-control-research.md`
 - `documentation/local-macos-service.md`
 - `CLAUDE.md` — project safety rules.
@@ -150,7 +155,8 @@ the abort path, not the intended end state.
   command.
 - Scope redirects to the printer IP where feasible so the app/ankerctl keep
   working during recon; don't disrupt the household network broadly.
-- Preserve secrets; work on `local-control`; keep the webserver restorable.
+- Preserve secrets; branch from current `main` for scoped changes; keep the
+  webserver restorable.
 
 ## Deliverables
 - `documentation/local-control-research.md` gains a "Step 4 — local broker

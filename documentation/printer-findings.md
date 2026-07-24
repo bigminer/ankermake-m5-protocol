@@ -121,7 +121,7 @@ plutil -extract EnvironmentVariables.ANKERCTL_TOKEN raw -o - \
 | Gotcha | Reality |
 | --- | --- |
 | `/ws/ctrl` replies `{"ankerctl": 1}` | **That is not the printer's reply.** It's an ack from ankerctl. The real reply arrives on `/ws/mqtt` as commandType `1043` with `resData`. Listen there. |
-| `1043` traffic floods with temp polls | Before the 2026-07-19 uncommitted mitigation, the browser polled `M105` every 10s even while telemetry flowed. Filter replies starting `ok T:` when reading older captures. Fresh `/ws/state` traffic now suppresses the next poll in browser tests; live revalidation is still needed. |
+| `1043` traffic floods with temp polls | Before the then-uncommitted 2026-07-19 mitigation (now merged into `main` through PR #20), the browser polled `M105` every 10s even while telemetry flowed. Filter replies starting `ok T:` when reading older captures. Fresh `/ws/state` traffic now suppresses the next poll in browser tests; live revalidation is still needed. |
 | Background monitors print nothing | Python buffers stdout to a file. Use `python -u`. |
 | Playwright screenshots vanish | They land in the **repo root**, not the output dir. Move them out; keep the worktree clean. |
 | `ankerctl mqtt monitor` fails to connect | It dials cloud (`make-mqtt.ankermake.com`). The printer is on the **local broker**. Use the running service's websockets instead. |
