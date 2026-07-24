@@ -229,6 +229,18 @@ mode: heater targets confirm from new target telemetry, heater-off is
 Protective, and fan requests become indeterminate because the printer exposes
 no fan-state fact.
 
+Two rules keep the safe direction reachable when telemetry degrades. Every
+Protective command — heater-off for any heater, and a fan request of 0% —
+skips the freshness gate, so shutting something down stays available exactly
+when state has gone stale; only raising a heater target or fan speed requires a
+fresh fact. A Protective Stop also supersedes any pending nozzle or bed target
+with `protective_stop_submitted`, because the Stop drives both targets to 0 and
+a pending target could otherwise decay into a `confirmation_timeout` that reads
+as a failure of the Stop itself. A pending fan request is deliberately left
+alone: Stop sends only `PRINT_CONTROL` and `M2024`, so there is no evidence it
+halts the fan, and it resolves to `indeterminate/confirmation_unavailable` like
+any other fan request.
+
 The first attended attempt on 2026-07-20 stopped before any named action was
 sent. Several synthetic zero-motion files were accepted by the PPPP transfer
 and caused a printer beep, but the printer stayed in state 0 and emitted no

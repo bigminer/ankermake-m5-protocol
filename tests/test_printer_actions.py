@@ -709,3 +709,126 @@ def test_obsolete_validation_evidence_does_not_ungate_changed_contract(tmp_path)
     assert outcome.status == "rejected"
     assert outcome.reason == "supervised_validation_required"
     assert protocol.effects == []
+
+
+def test_protective_stop_supersedes_pending_heater_targets(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe(
+        "printer-0",
+        {
+            "nozzle": {"current": 2000},
+            "bed": {"current": 2100},
+            "state": "printing",
+            "print": {"name": "job.gcode"},
+        },
+    )
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=RecordingProtocol(),
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+        confirmation_timeout=30,
+    )
+
+    actions.submit(ActionRequest("nozzle-40", "printer-0", NozzleTarget(celsius=40)))
+    actions.submit(ActionRequest("bed-35", "printer-0", BedTarget(celsius=35)))
+    actions.submit(ActionRequest("stop-1", "printer-0", Stop()))
+
+    current = next(actions.watch(Watch("printer-0"))).actions
+    for request_id in ("nozzle-40", "bed-35"):
+        assert current[request_id].status == "superseded"
+        assert current[request_id].reason == "protective_stop_submitted"
+
+    # The Stop zeroes both targets, so a heater target left pending would
+    # otherwise decay into a confirmation_timeout that reads as Stop failure.
+    clock.now += 31
+    snapshots.observe(
+        "printer-0",
+        {"nozzle": {"target": 0}, "bed": {"target": 0}, "state": "idle"},
+    )
+    actions.tick()
+
+    current = next(actions.watch(Watch("printer-0"))).actions
+    assert current["nozzle-40"].reason == "protective_stop_submitted"
+    assert current["bed-35"].reason == "protective_stop_submitted"
+
+
+def test_protective_stop_leaves_a_pending_fan_setting_alone(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe(
+        "printer-0", {"state": "printing", "print": {"name": "job.gcode"}}
+    )
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=RecordingProtocol(),
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+        confirmation_timeout=30,
+    )
+
+    actions.submit(ActionRequest("fan-50", "printer-0", FanSetting(percent=50)))
+    actions.submit(ActionRequest("stop-1", "printer-0", Stop()))
+
+    # Stop sends only PRINT_CONTROL and M2024, so claiming it superseded a fan
+    # request would assert a physical effect we have no evidence for.
+    fan = next(actions.watch(Watch("printer-0"))).actions["fan-50"]
+    assert fan.status == "accepted"
+
+    clock.now += 31
+    actions.tick()
+
+    fan = next(actions.watch(Watch("printer-0"))).actions["fan-50"]
+    assert fan.status == "indeterminate"
+    assert fan.reason == "confirmation_unavailable"
+
+
+def test_stopping_the_fan_stays_available_when_state_is_stale(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe("printer-0", {"state": "idle"})
+    clock.now += 16
+    protocol = RecordingProtocol()
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=protocol,
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+    )
+
+    raising = actions.submit(
+        ActionRequest("fan-50", "printer-0", FanSetting(percent=50))
+    )
+    stopping = actions.submit(
+        ActionRequest("fan-0", "printer-0", FanSetting(percent=0))
+    )
+
+    assert raising.status == "rejected"
+    assert raising.reason == "fresh_printer_state_required"
+    assert stopping.status == "accepted"
+    assert protocol.effects == [("gcode", "printer-0", "M107")]
+
+
+def test_a_new_fan_setting_supersedes_the_pending_one(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe("printer-0", {"state": "idle"})
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=RecordingProtocol(),
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=True,
+    )
+
+    actions.submit(ActionRequest("fan-50", "printer-0", FanSetting(percent=50)))
+    actions.submit(ActionRequest("fan-80", "printer-0", FanSetting(percent=80)))
+
+    current = next(actions.watch(Watch("printer-0"))).actions
+    assert current["fan-50"].status == "superseded"
+    assert current["fan-50"].reason == "newer_target_submitted"
+    assert current["fan-80"].status == "accepted"

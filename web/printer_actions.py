@@ -197,8 +197,20 @@ class PrinterActions:
                     )
                     del self._deadlines[pending_id]
                     self._contexts.pop(pending_id, None)
+            # A Protective Stop drives both heater targets to 0, which is what
+            # _stop_is_confirmed waits on.  A pending heater target can never
+            # reach its own value after that, so resolve it as superseded
+            # rather than letting it decay into a confirmation_timeout that
+            # reads as a failure of the Stop.  The fan is deliberately excluded:
+            # Stop sends only PRINT_CONTROL and M2024, so we have no evidence
+            # it halts the fan.
+            self._supersede_resource_targets(
+                request.printer_id, {"nozzle", "bed"}, "protective_stop_submitted"
+            )
         if resources:
-            self._supersede_resource_targets(request.printer_id, resources)
+            self._supersede_resource_targets(
+                request.printer_id, resources, "newer_target_submitted"
+            )
 
         lock = self._locks.setdefault(request.printer_id, Lock())
         try:
@@ -357,9 +369,13 @@ class PrinterActions:
                 or not 0 <= request.action.percent <= 100
             ):
                 return {"error": "invalid_action_parameters"}
-            snapshot = self._snapshot(request.printer_id)
-            if snapshot.facts["state"].freshness != "fresh":
-                return {"error": "fresh_printer_state_required"}
+            # Stopping the fan is Protective in the same sense as HeaterOff:
+            # it must stay available exactly when telemetry has gone stale.
+            # Only raising fan speed requires a fresh state fact.
+            if request.action.percent > 0:
+                snapshot = self._snapshot(request.printer_id)
+                if snapshot.facts["state"].freshness != "fresh":
+                    return {"error": "fresh_printer_state_required"}
             return {"resources": ("fan",), "confirmation": "unavailable"}
 
         return {}
@@ -384,7 +400,7 @@ class PrinterActions:
 
         return next(self._snapshots.watch(Watch(printer_id)))
 
-    def _supersede_resource_targets(self, printer_id, resources):
+    def _supersede_resource_targets(self, printer_id, resources, reason):
         for pending_id in list(self._deadlines):
             pending = self._records[pending_id]
             pending_resources = set(
@@ -392,7 +408,7 @@ class PrinterActions:
             )
             if pending.printer_id != printer_id or not resources & pending_resources:
                 continue
-            self._transition(pending, "superseded", "newer_target_submitted")
+            self._transition(pending, "superseded", reason)
             del self._deadlines[pending_id]
             self._contexts.pop(pending_id, None)
 
