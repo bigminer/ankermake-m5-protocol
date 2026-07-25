@@ -111,6 +111,31 @@ app.config["action_validation_mode"] = os.environ.get(
 app.config["action_confirmation_timeout"] = float(
     os.environ.get("ANKERCTL_ACTION_CONFIRMATION_TIMEOUT", "30")
 )
+
+
+def _parse_validated_contracts(raw):
+    """Parse "nozzle_target=m5c-nozzle-target-v1,bed_target=..." into a dict.
+
+    Supervised validation evidence names the exact contract it established, so
+    an operator ungates one validated action by naming it.  Changing that
+    action's contract makes the stale value stop matching, which re-gates that
+    action alone.  Deliberately separate from ANKERCTL_ACTION_VALIDATION_MODE:
+    that switch ungates every action at once and is only for attended runs.
+
+    Malformed entries are dropped rather than raising.  A typo must fail
+    closed -- leaving the action gated -- never abort webserver startup.
+    """
+    contracts = {}
+    for pair in raw.split(","):
+        kind, sep, contract = pair.partition("=")
+        if sep and kind.strip() and contract.strip():
+            contracts[kind.strip()] = contract.strip()
+    return contracts
+
+
+app.config["validated_action_contracts"] = _parse_validated_contracts(
+    os.environ.get("ANKERCTL_VALIDATED_ACTION_CONTRACTS", "")
+)
 app.config["action_journal_path"] = os.environ.get(
     "ANKERCTL_ACTION_JOURNAL_PATH",
     os.path.join(os.path.expanduser("~"), ".local", "state", "ankerctl", "actions.jsonl"),
@@ -826,6 +851,7 @@ def register_services(app):
             protocol=MqttActionProtocol(app),
             journal_path=app.config["action_journal_path"],
             validation_mode=app.config["action_validation_mode"],
+            validated_contracts=app.config["validated_action_contracts"],
             confirmation_timeout=app.config["action_confirmation_timeout"],
         )
 
