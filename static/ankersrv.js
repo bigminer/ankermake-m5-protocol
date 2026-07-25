@@ -493,9 +493,24 @@ $(function () {
         if (!action) {
             return;
         }
-        const label = action.action.charAt(0).toUpperCase() + action.action.slice(1);
-        const status = $("#print-action-status");
-        if (action.status === "accepted") {
+        const labels = {
+            nozzle_target: "Nozzle target",
+            bed_target: "Bed target",
+            heater_off: "Heater off",
+            fan_setting: "Fan setting",
+        };
+        const label = labels[action.action]
+            || action.action.charAt(0).toUpperCase() + action.action.slice(1);
+        let status = $("#print-action-status");
+        if (["nozzle_target", "bed_target", "heater_off"].includes(action.action)) {
+            status = $("#thermal-action-status, #home-thermal-action-status");
+        } else if (action.action === "fan_setting") {
+            status = $("#fan-action-status");
+        }
+        if (action.status === "submitted") {
+            status.attr("class", "small text-warning mb-0 mt-3")
+                .text(`${label} submitted — awaiting server acceptance.`);
+        } else if (action.status === "accepted") {
             status.attr("class", "small text-warning mb-0 mt-3")
                 .text(`${label} accepted — awaiting printer confirmation.`);
         } else if (action.status === "confirmed") {
@@ -503,10 +518,14 @@ $(function () {
                 .text(`${label} confirmed by printer telemetry.`);
         } else if (action.status === "indeterminate") {
             status.attr("class", "small text-danger mb-0 mt-3")
-                .text(`${label} could not be confirmed. Use the printer's physical controls; remove power if motion remains hazardous.`);
+                .text(action.action === "stop"
+                    ? `${label} could not be confirmed. Use the printer's physical controls; remove power if motion remains hazardous.`
+                    : `${label} could not be confirmed: ${action.reason}.`);
         } else if (action.status === "superseded") {
             status.attr("class", "small text-warning mb-0 mt-3")
-                .text(`${label} was superseded by the protective Stop request.`);
+                .text(action.reason === "protective_stop_submitted"
+                    ? `${label} was superseded by the protective Stop request.`
+                    : `${label} was superseded by a newer request.`);
         } else if (action.status === "rejected") {
             status.attr("class", "small text-danger mb-0 mt-3")
                 .text(`${label} was not sent: ${action.reason}.`);
@@ -544,7 +563,7 @@ $(function () {
                 const actions = Object.values(data.actions);
                 if (actions.length) {
                     actions.sort((a, b) => a.updatedAt - b.updatedAt);
-                    renderActionOutcome(actions[actions.length - 1]);
+                    actions.forEach(renderActionOutcome);
                 }
             }
             lastTelemetry = Date.now();
@@ -954,26 +973,33 @@ $(function () {
             flash_message("Enter a temperature within the allowed range", "warning");
             return;
         }
-        // PREHEAT_CONFIG stores a profile; it does not change the active
-        // heater target. M104/M140 are the firmware commands that do.
-        if (setting.kind === "nozzle") {
-            requestedNozzleTarget = target;
-            $("#control-nozzle-input").val(target);
+        if (actionValidationMode) {
+            if (target === 0) {
+                sendNamedAction("heater_off", {heater: setting.kind});
+            } else {
+                sendNamedAction(`${setting.kind}_target`, {celsius: target});
+            }
         } else {
-            requestedBedTarget = target;
-            $("#control-bed-input").val(target);
+            // PREHEAT_CONFIG stores a profile; it does not change the active
+            // heater target. M104/M140 are the firmware commands that do.
+            if (setting.kind === "nozzle") {
+                requestedNozzleTarget = target;
+                $("#control-nozzle-input").val(target);
+            } else {
+                requestedBedTarget = target;
+                $("#control-bed-input").val(target);
+            }
+            sendGcode(`${setting.command} S${target}`);
+            setText([setting.target], `${target}°C`);
         }
-        sendGcode(`${setting.command} S${target}`);
-        setText([setting.target], `${target}°C`);
     }
 
     /**
      * Control tab
      *
-     * Sends printer commands over the /ws/ctrl websocket as raw GCode
-     * (GCODE_COMMAND). Pause/resume use PRINT_CONTROL with the active job
-     * identity. Stop combines PRINT_CONTROL cancellation with M2024 so both
-     * the communication-module job and MCU-buffered motion are stopped.
+     * Validation mode submits typed Printer actions. Legacy mode preserves the
+     * established raw control path until each action passes supervised
+     * validation and the migration contract is complete.
      */
     function ctrlReady() {
         return sockets.ctrl && sockets.ctrl.ws && sockets.ctrl.is_open;
@@ -1009,7 +1035,7 @@ $(function () {
         sockets.ctrl.ws.send(JSON.stringify(message));
     }
 
-    function sendNamedAction(type) {
+    function sendNamedAction(type, parameters = {}) {
         if (!ctrlReady()) {
             flash_message("Control socket not connected", "warning");
             return;
@@ -1017,9 +1043,10 @@ $(function () {
         const requestId = (window.crypto && window.crypto.randomUUID)
             ? window.crypto.randomUUID()
             : `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        sockets.ctrl.ws.send(JSON.stringify({action: {requestId: requestId, type: type}}));
-        $("#print-action-status").attr("class", "small text-warning mb-0 mt-3")
-            .text(`${type.charAt(0).toUpperCase() + type.slice(1)} submitted — awaiting server acceptance.`);
+        sockets.ctrl.ws.send(JSON.stringify({
+            action: {requestId: requestId, type: type, ...parameters},
+        }));
+        renderActionOutcome({action: type, status: "submitted", reason: null});
     }
 
     // Pause/resume identify the running job by name. Stop is deliberately not
@@ -1105,7 +1132,9 @@ $(function () {
     });
     $("#fan-apply").on("click", function () {
         const pct = parseInt($("#fan-slider").val());
-        if (pct <= 0) {
+        if (actionValidationMode) {
+            sendNamedAction("fan_setting", {percent: pct});
+        } else if (pct <= 0) {
             sendGcode("M107");
         } else {
             sendGcode(`M106 S${Math.round(pct * 255 / 100)}`);

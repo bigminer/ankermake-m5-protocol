@@ -8,7 +8,13 @@ from unittest import mock
 
 from cli.model import Account, Config, Printer
 from web import app, _require_token, _state_updates, ctrl_send_mqtt, ctrl_submit_action
-from web.printer_actions import Pause
+from web.printer_actions import (
+    BedTarget,
+    FanSetting,
+    HeaterOff,
+    NozzleTarget,
+    Pause,
+)
 from web.lib.service import RunState
 from web.printer_snapshot import PrinterSnapshots
 
@@ -386,6 +392,45 @@ class WebUiTestCase(unittest.TestCase):
         self.assertEqual(submitted[0].printer_id, "printer-0")
         self.assertIsInstance(submitted[0].action, Pause)
         self.assertEqual(json.loads(socket.sent[0])["action"]["status"], "accepted")
+
+    def test_named_thermal_action_adapter_builds_typed_server_requests(self):
+        app.config["printer_index"] = 0
+        submitted = []
+
+        class FakeActions:
+            def submit(self, request):
+                submitted.append(request)
+                return SimpleNamespace(to_dict=lambda: {
+                    "requestId": request.request_id,
+                    "status": "accepted",
+                })
+
+        from types import SimpleNamespace
+        app.printer_actions = FakeActions()
+        socket = FakeSocket([])
+
+        messages = [
+            {"requestId": "nozzle-1", "type": "nozzle_target", "celsius": 40},
+            {"requestId": "bed-1", "type": "bed_target", "celsius": 35},
+            {"requestId": "off-1", "type": "heater_off", "heater": "nozzle"},
+            {"requestId": "fan-1", "type": "fan_setting", "percent": 50},
+        ]
+        for message in messages:
+            ctrl_submit_action(socket, {**message, "printerId": "attacker-chosen"})
+
+        self.assertEqual(
+            [request.printer_id for request in submitted],
+            ["printer-0"] * 4,
+        )
+        self.assertEqual(
+            [request.action for request in submitted],
+            [
+                NozzleTarget(celsius=40),
+                BedTarget(celsius=35),
+                HeaterOff(heater="nozzle"),
+                FanSetting(percent=50),
+            ],
+        )
 
     def test_ws_ctrl_gcode_command_round_trip(self):
         app.config["access_token"] = ""

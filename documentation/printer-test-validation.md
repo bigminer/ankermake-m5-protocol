@@ -223,8 +223,23 @@ Remaining:
 The server-owned action path implements these gates offline. It is disabled
 unless `ANKERCTL_ACTION_VALIDATION_MODE=true`, journals acceptance before
 sending, never replays unresolved actions after restart, and reports
-`accepted`, `confirmed`, `rejected`, `superseded`, or `indeterminate`. It still
-`NEEDS LIVE REVALIDATION` before enabling normal UI use.
+`accepted`, `confirmed`, `rejected`, `superseded`, or `indeterminate`. Named
+nozzle, bed, heater-off, and fan actions are also available only in validation
+mode: heater targets confirm from new target telemetry, heater-off is
+Protective, and fan requests become indeterminate because the printer exposes
+no fan-state fact.
+
+Two rules keep the safe direction reachable when telemetry degrades. Every
+Protective command — heater-off for any heater, and a fan request of 0% —
+skips the freshness gate, so shutting something down stays available exactly
+when state has gone stale; only raising a heater target or fan speed requires a
+fresh fact. A Protective Stop also supersedes any pending nozzle or bed target
+with `protective_stop_submitted`, because the Stop drives both targets to 0 and
+a pending target could otherwise decay into a `confirmation_timeout` that reads
+as a failure of the Stop itself. A pending fan request is deliberately left
+alone: Stop sends only `PRINT_CONTROL` and `M2024`, so there is no evidence it
+halts the fan, and it resolves to `indeterminate/confirmation_unavailable` like
+any other fan request.
 
 The first attended attempt on 2026-07-20 stopped before any named action was
 sent. Several synthetic zero-motion files were accepted by the PPPP transfer
@@ -233,6 +248,18 @@ and caused a printer beep, but the printer stayed in state 0 and emitted no
 They did expose and fix two preflight defects: state normalization now handles
 1000/subType 1 `value`, and file transfer now rejects non-OK or malformed AABB
 acknowledgements. Validation mode was disabled again after the attempt.
+
+An attended thermal/fan run on 2026-07-23 produced successful telemetry evidence
+for nozzle and bed targets, same-resource supersession, independent-resource
+coordination, and Protective all-heaters-off from a stale snapshot. The
+operator also confirmed the part fan ran at the 50% request and stopped at 0%.
+Both fan outcomes correctly became `indeterminate/confirmation_unavailable`
+because the protocol has no fan-state fact. The M5C also has no numeric
+temperature display, so the operator could not independently compare heater
+targets with telemetry. See the dated request-by-request ledger in
+[printer-findings.md](printer-findings.md). Issue #15 remains incomplete and
+all named thermal/fan actions remain gated for normal operation until those
+evidence limitations are explicitly resolved.
 
 ## Expected Live Flow
 

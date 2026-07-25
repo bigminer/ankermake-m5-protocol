@@ -121,7 +121,7 @@ plutil -extract EnvironmentVariables.ANKERCTL_TOKEN raw -o - \
 | Gotcha | Reality |
 | --- | --- |
 | `/ws/ctrl` replies `{"ankerctl": 1}` | **That is not the printer's reply.** It's an ack from ankerctl. The real reply arrives on `/ws/mqtt` as commandType `1043` with `resData`. Listen there. |
-| `1043` traffic floods with temp polls | Before the 2026-07-19 uncommitted mitigation, the browser polled `M105` every 10s even while telemetry flowed. Filter replies starting `ok T:` when reading older captures. Fresh `/ws/state` traffic now suppresses the next poll in browser tests; live revalidation is still needed. |
+| `1043` traffic floods with temp polls | Before the then-uncommitted 2026-07-19 mitigation (now merged into `main` through PR #20), the browser polled `M105` every 10s even while telemetry flowed. Filter replies starting `ok T:` when reading older captures. Fresh `/ws/state` traffic now suppresses the next poll in browser tests; live revalidation is still needed. |
 | Background monitors print nothing | Python buffers stdout to a file. Use `python -u`. |
 | Playwright screenshots vanish | They land in the **repo root**, not the output dir. Move them out; keep the worktree clean. |
 | `ankerctl mqtt monitor` fails to connect | It dials cloud (`make-mqtt.ankermake.com`). The printer is on the **local broker**. Use the running service's websockets instead. |
@@ -442,6 +442,41 @@ Do not infer anything about the new Pause/Resume/Stop implementation from the
 synthetic attempts: there was never an active job to act on. The next live test
 requires separate authorization for a real slicer-generated job and must retain
 the physical-control fallback.
+
+### Named thermal/fan action validation (2026-07-23)
+
+This attended run exercised only the bounded actions in issue #15 on the M5C
+(V8110, firmware V3.1.56). Before the first live command, the operator confirmed
+that they were at the printer, the bed and toolhead path were clear, the
+filament path was safe, and the power switch was immediately accessible. No
+motion, homing, upload, print start, or print-control action was attempted.
+
+The initial `issue15-20260723-fan50-01` request was rejected with
+`supervised_validation_required` because launchd had not reloaded the changed
+validation-mode environment variable. It had no physical effect. After an
+explicit unload/load and an authenticated rendered-mode check, the remaining
+requests ran through the named-action path:
+
+| Request | Evidence | Status |
+| --- | --- | --- |
+| `issue15-20260723-fan50-02` — fan 50% | server accepted; operator heard the part fan running; no fan-state fact exists, so the outcome became `indeterminate/confirmation_unavailable` | physical operation `CONFIRMED`; telemetry confirmation unavailable |
+| `issue15-20260723-fan0-01` — fan 0% | server accepted; operator confirmed the part fan stopped; outcome became `indeterminate/confirmation_unavailable` | physical operation `CONFIRMED`; telemetry confirmation unavailable |
+| `issue15-20260723-nozzle40-01` — nozzle 40C | accepted, then replaced immediately by the next nozzle target | `superseded/newer_target_submitted` `CONFIRMED` |
+| `issue15-20260723-nozzle45-01` — nozzle 45C | new target telemetry reported 4500 centi-degrees and the action became `confirmed`; observed current rose from 25.00C to 51.00C during the bounded sample | target and heating response `CONFIRMED`; transient overshoot recorded |
+| `issue15-20260723-bed35-01` — bed 35C | proceeded independently of the nozzle supersession; new target telemetry reported 3500 centi-degrees and the action became `confirmed`; observed current rose from 25.32C to 36.32C | independence, target, and heating response `CONFIRMED`; transient overshoot recorded |
+| `issue15-20260723-heatersoff-stale-01` — all heaters off | before submission the lazy MQTT service reported `Stopped`, establishing the stale-state fixture; the Protective action was accepted, both new targets became 0, and the action became `confirmed` | stale-state eligibility and shutdown `CONFIRMED` |
+
+The M5C has no numeric temperature display, so the operator correctly reported
+that they had no way to visually compare the requested heater targets with the
+telemetry. That part of issue #15's human-and-telemetry criterion was therefore
+not measurable by this fixture. The fan direction was human-observable, but
+fan speed remains absent from telemetry. These are evidence limitations, not
+confirmation failures to paper over.
+
+Validation mode was returned to `false` and the web service was reloaded. The
+final read-only status was printer state 0, nozzle 40.00C with target 0, and bed
+33.74C with target 0. The named thermal and fan actions remain gated for normal
+operation pending disposition of the issue #15 evidence gaps.
 
 **Lesson worth more than any single reading: when this printer has a hard problem,
 the answer has repeatedly been its own physical interface or the runbook — not a
