@@ -180,12 +180,55 @@ Criterion 3 is met for nozzle and bed. Two items remain:
    `ANKERCTL_VALIDATED_ACTION_CONTRACTS="nozzle_target=m5c-nozzle-target-v1,bed_target=m5c-bed-target-v1,heater_off=m5c-heater-off-v1"`
    That enables exactly the three actions with successful evidence and leaves
    everything else gated. Issue 15 can close once this is set.
-2. **`fan_setting` is deliberately excluded, pending a decision.** It can never
-   reach `confirmed`, because the M5C publishes no fan-state fact: every request
-   resolves `indeterminate/confirmation_unavailable`, which the UI renders as a
-   warning. Physical operation is proven. Whether an action that always reports
-   uncertainty is acceptable for normal use is a product decision, not a
-   technical gap.
+2. **`fan_setting` is deliberately excluded, pending a decision.** See below.
+
+#### The `fan_setting` decision
+
+Deliberately left open on 2026-07-26 rather than decided quietly, because the
+reasoning is easy to lose and the obvious-looking answer is probably wrong.
+
+**The mechanic.** The M5C publishes no fan-state fact, so a fan action has
+nothing to confirm against. It is accepted, `M106`/`M107` is sent, and 30
+seconds later it resolves `indeterminate/confirmation_unavailable`. That is not
+a bug and no fixture can fix it — it is a permanent property of the protocol.
+
+**The tension.** The action works. On 2026-07-26 the operator heard the fan
+start at 50% and stop at 0%, from a verified-silent baseline, and both requests
+resolved `indeterminate`. So the *only* thing normal use would add is a UI that
+reports failure-shaped uncertainty every single time the fan is commanded, for
+an action that is in fact working perfectly.
+
+**Why that matters more than it looks.** `renderActionOutcome` in
+`static/ankersrv.js` styles `indeterminate` as `text-danger` and prints "could
+not be confirmed: confirmation_unavailable". Every fan press would produce a red
+message. That is precisely the alarm-fatigue failure the Stop-supersession fix
+in `367346a` was made to avoid: a warning that fires when nothing is wrong
+teaches the operator to ignore warnings that fire when something is. Enabling
+`fan_setting` as it stands would reintroduce that pattern, in the same UI, weeks
+after removing it.
+
+**The options, roughly in order of preference.**
+
+- **Soften the copy first, then enable.** Give `fan_setting` its own
+  `indeterminate` string — something like "Fan setting sent; this printer
+  reports no fan telemetry to confirm it" — styled as information rather than
+  danger. This is the one change that makes the outcome honest *and* accurate:
+  the request genuinely did what it could, and nothing is wrong. Was raised as
+  finding 5 in the #21 review and not actioned.
+- **Add a distinct outcome status** (`unconfirmable`, say) separate from
+  `indeterminate`, so the server distinguishes "we could not confirm this" from
+  "this class of action is never confirmable". Cleaner semantically, but it
+  widens the action contract and touches every consumer.
+- **Enable as-is and accept the red text.** Fastest, and the option that trains
+  operators to discount warnings. Not recommended.
+- **Leave it gated indefinitely.** The legacy browser path still drives the fan
+  when validation mode is off, so nothing is lost operationally today. The cost
+  is that #19 (contract the legacy path) can never fully land while one control
+  still depends on that path.
+
+**What is not in question:** the fan action's server-side behavior is correct
+and validated, including Protective fan-off under stale state. This is entirely
+a question of how the outcome is presented.
 
 ### Next implementation work
 
