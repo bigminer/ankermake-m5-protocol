@@ -163,13 +163,20 @@ Environment variables:
 | `ANKERCTL_SLICER_TOKEN` | Remote slicer upload API key | Required when Orca runs off-host; value kept only in the plist |
 | `ANKERCTL_SECRET_KEY` | Stable Flask session signing key | Required; random secret kept only in the plist |
 | `ANKERCTL_MAX_UPLOAD_BYTES` | Largest accepted slicer upload | Defaults to 512 MiB; lower it if your profiles allow |
-| `ANKERCTL_PREPRINT_G36` | Experimental pre-upload preparation hook | Must remain `false` |
-| `ANKERCTL_PREPRINT_COMMAND_TIMEOUT` | Experimental hook timeout | Present but unused while hook is disabled |
+| `ANKERCTL_PREPRINT_G36` | Preheat-and-G36 preparation before a print starts | Must remain `false` |
+| `ANKERCTL_PREPRINT_COMMAND_TIMEOUT` | Preparation timeout, also the `print_start` heat-up limit | Present but unused while preparation is disabled |
 | `ANKERCTL_ACTION_VALIDATION_MODE` | Enables **every** named action at once | Must remain `false` outside an attended validation |
 | `ANKERCTL_VALIDATED_ACTION_CONTRACTS` | Ungates individual actions that passed supervised validation | Empty by default; see below |
 | `ANKERCTL_ACTION_CONFIRMATION_TIMEOUT` | Time allowed for telemetry confirmation | Defaults to 30 seconds |
 | `ANKERCTL_ACTION_JOURNAL_PATH` | Durable action-outcome journal | Optional; defaults to the user's local state directory |
+| `ANKERCTL_ARTIFACT_STAGING_PATH` | Where uploads are staged before transfer | Optional; defaults to the user's local state directory |
 | `ANKERCTL_WEBCAM_URL` | Optional environment-level webcam URL | Not required when URL is saved in `default.json` |
+
+Staged uploads are addressed only by an opaque reference. The journal records
+that reference and nothing else about the artifact, so neither the file's
+contents nor the caller's path reaches it. Anything still in the staging
+directory when the server starts is unreachable and is removed, because a
+restart never replays an action.
 
 ### Ungating a validated action
 

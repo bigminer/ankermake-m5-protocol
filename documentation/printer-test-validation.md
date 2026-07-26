@@ -116,6 +116,45 @@ G36 tests validate only fixture rejection and hook dispatch, not leveling.
 Do not re-run the resolved-upload G36 test expecting completion until a
 firmware-level command contract is confirmed (serial console visibility).
 
+## The `print_start` Compound action order
+
+Contract `m5c-print-start-v1`. Gated until issue
+[#18](https://github.com/bigminer/ankermake-m5-protocol/issues/18) records
+supervised evidence. Live validation must observe exactly this order:
+
+1. **Staging (no printer contact).** The upload is written to the local staging
+   directory and the server derives its own safe metadata: a sanitized name, a
+   size, the caller identity from the request's `User-Agent`, and — only when
+   `ANKERCTL_PREPRINT_G36` is set — the resolved `M190`/`M109` temperatures.
+   The caller receives an opaque reference and nothing else.
+2. **Policy (no printer contact).** Before anything heats or transfers, the
+   action requires a fresh `state` fact that reads idle, a known staged
+   artifact, no other unresolved job action, and preparation temperatures
+   within the firmware clamps (bed 1–115C, nozzle 150–310C) with fresh
+   `bed.current` and `nozzle.current` to confirm the heat-up against. Failing
+   any of these is a `rejected` outcome: nothing was submitted.
+3. **Preparation**, when temperatures were staged: `M104 S150`, `M140 S<bed>`,
+   wait for the bed within 0.5C, `M104 S<nozzle>`, wait for the nozzle within
+   1C, then the `G36` routine. Skipped entirely when preparation is disabled.
+4. **Transfer, then start.** These two are inseparable and are the only part of
+   the action that holds the per-printer protocol lock, so no unrelated action
+   can interleave between the last data frame and the start submission.
+5. **Confirmation.** The action confirms only when telemetry reports the
+   printer printing the staged job name. A timeout is `indeterminate`, never
+   success.
+
+Two behaviors matter for the validation run:
+
+- **Any failure after step 3 begins is `indeterminate`, not `rejected`.** The
+  heaters were already commanded, so the server cannot claim nothing happened.
+  Cleanup discards the staged artifact and sends `M104 S0`/`M140 S0`.
+- **A Protective Stop cancels a preparing or transferring print**, resolving it
+  as `superseded/protective_stop_submitted` and running the same cleanup.
+
+Because `G36` is not honored by production firmware (see above), a supervised
+run should validate the unprepared path first, with `ANKERCTL_PREPRINT_G36`
+`false`.
+
 ## Web homing disabled (incidents 2026-07-13)
 
 Two supervised attempts drove the nozzle into the plate without the load-based

@@ -754,6 +754,45 @@ def test_validation_mode_renders_pause_superseded_by_protective_stop(
     assert "stop" in status
 
 
+def test_print_start_reports_its_stage_and_final_outcome(
+    page, live_http_server, configured_app
+):
+    configured_app.config["action_validation_mode"] = True
+    _login(page, live_http_server)
+    page.click("#print-tab")
+
+    def emit(cursor, status, reason):
+        page.evaluate(
+            f"""
+            window.__wsInstances.find((ws) => ws.url.includes("/ws/state")).emit({{
+                cursor: {cursor},
+                actions: {{
+                    "print-1": {{
+                        requestId: "print-1",
+                        action: "print_start",
+                        status: "{status}",
+                        reason: {reason},
+                        updatedAt: {cursor},
+                    }},
+                }},
+                facts: {{}},
+            }});
+            """
+        )
+        return page.locator("#print-start-action-status").inner_text().lower()
+
+    assert "preparing the printer" in emit(10, "accepted", '"preparing"')
+    assert "transferring the file" in emit(11, "accepted", '"transferring"')
+    assert "awaiting printer confirmation" in emit(
+        12, "accepted", '"awaiting_confirmation"'
+    )
+    assert "confirmed" in emit(13, "confirmed", "null")
+
+    failed = emit(14, "indeterminate", '"transfer_failed"')
+    assert "could not be confirmed" in failed
+    assert "transfer_failed" in failed
+
+
 def test_attended_filament_and_z_controls_send_bounded_gcode(page, live_http_server):
     _login(page, live_http_server)
     page.click("#control-tab")

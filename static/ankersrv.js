@@ -498,6 +498,14 @@ $(function () {
             bed_target: "Bed target",
             heater_off: "Heater off",
             fan_setting: "Fan setting",
+            print_start: "Print start",
+        };
+        // A print start reports its stage while it remains accepted: preparation
+        // and transfer take minutes, so "awaiting confirmation" alone would be
+        // indistinguishable from a stalled request.
+        const acceptedStage = {
+            preparing: "preparing the printer",
+            transferring: "transferring the file",
         };
         const label = labels[action.action]
             || action.action.charAt(0).toUpperCase() + action.action.slice(1);
@@ -506,13 +514,17 @@ $(function () {
             status = $("#thermal-action-status, #home-thermal-action-status");
         } else if (action.action === "fan_setting") {
             status = $("#fan-action-status");
+        } else if (action.action === "print_start") {
+            status = $("#print-start-action-status");
         }
         if (action.status === "submitted") {
             status.attr("class", "small text-warning mb-0 mt-3")
                 .text(`${label} submitted — awaiting server acceptance.`);
         } else if (action.status === "accepted") {
             status.attr("class", "small text-warning mb-0 mt-3")
-                .text(`${label} accepted — awaiting printer confirmation.`);
+                .text(acceptedStage[action.reason]
+                    ? `${label} accepted — ${acceptedStage[action.reason]}.`
+                    : `${label} accepted — awaiting printer confirmation.`);
         } else if (action.status === "confirmed") {
             status.attr("class", "small text-success mb-0 mt-3")
                 .text(`${label} confirmed by printer telemetry.`);

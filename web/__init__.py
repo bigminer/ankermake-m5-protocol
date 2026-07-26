@@ -38,6 +38,7 @@ from datetime import datetime
 from queue import Empty, Queue
 from secrets import token_urlsafe as token
 from urllib.parse import urlsplit
+from uuid import uuid4
 from flask import Flask, flash, request, render_template, Response, session, url_for, jsonify, redirect
 from flask_sock import Sock
 from user_agents import parse as user_agent_parse
@@ -54,10 +55,13 @@ from web.printer_actions import (
     MqttActionProtocol,
     NozzleTarget,
     Pause,
+    PpppTransferProtocol,
+    PrintStart,
     PrinterActions,
     Resume,
     Stop,
 )
+from web.printer_artifacts import ArtifactError, ArtifactStore
 
 import web.config
 import web.platform
@@ -139,6 +143,12 @@ app.config["validated_action_contracts"] = _parse_validated_contracts(
 app.config["action_journal_path"] = os.environ.get(
     "ANKERCTL_ACTION_JOURNAL_PATH",
     os.path.join(os.path.expanduser("~"), ".local", "state", "ankerctl", "actions.jsonl"),
+)
+# Uploads are staged outside the repository and outside the journal: the
+# journal only ever records the opaque reference this directory is keyed by.
+app.config["artifact_staging_path"] = os.environ.get(
+    "ANKERCTL_ARTIFACT_STAGING_PATH",
+    os.path.join(os.path.expanduser("~"), ".local", "state", "ankerctl", "staging"),
 )
 
 app.svc = ServiceManager()
@@ -745,6 +755,39 @@ def app_api_ankerctl_server_internal_reload(success_message: str=None):
     return web.util.flash_redirect(url_for('app_root'), success_message, "success")
 
 
+def _stage_and_start_print(file):
+    """Translate one upload into the named print-start action.
+
+    Returns the action outcome, or ``None`` while the action is still gated
+    behind Supervised validation and the legacy upload path remains in force.
+    Staging, printer identity, and caller identity are all derived here from
+    trusted server context; the uploaded body chooses none of them.
+    """
+    actions = app.printer_actions
+    if actions is None or not actions.is_enabled("print_start"):
+        return None
+
+    user_name, origin = web.util.upload_identity()
+    artifact = actions.artifacts.stage(
+        file,
+        user_name=user_name,
+        origin=origin,
+        extract_temperatures=bool(app.config.get("preprint_g36")),
+    )
+    outcome = actions.submit(ActionRequest(
+        # An HTTP upload carries no request identity of its own, so the server
+        # mints one.  Resubmitting a file is a new physical request.
+        request_id=str(uuid4()),
+        printer_id=f"printer-{app.config['printer_index']}",
+        action=PrintStart(artifact=artifact.reference),
+    ))
+    if outcome.status == "rejected":
+        # A rejection proves the action never took the artifact, and an HTTP
+        # caller keeps no reference to retry with.
+        actions.artifacts.discard(artifact.reference)
+    return outcome
+
+
 @app.post("/api/ankerctl/file/upload")
 def app_api_ankerctl_file_upload():
     if request.method != "POST":
@@ -754,9 +797,21 @@ def app_api_ankerctl_file_upload():
     file = request.files["gcode_file"]
 
     try:
-        web.util.upload_file_to_printer(app, file)
+        outcome = _stage_and_start_print(file)
+        if outcome is None:
+            web.util.upload_file_to_printer(app, file)
+            return web.util.flash_redirect(url_for('app_root'),
+                                           f"File {file.filename} sent to printer!", "success")
+        if outcome.status == "rejected":
+            return web.util.flash_redirect(
+                url_for('app_root'),
+                f"Print was not started: {outcome.reason}", "danger")
+        return web.util.flash_redirect(
+            url_for('app_root'),
+            "Print start accepted — awaiting printer confirmation.", "info")
+    except ArtifactError as err:
         return web.util.flash_redirect(url_for('app_root'),
-                                       f"File {file.filename} sent to printer!", "success")
+                                       f"Print was not started: {err.reason}", "danger")
     except ConnectionError as err:
         return web.util.flash_redirect(url_for('app_root'),
                                        "Cannot connect to printer!\n"
@@ -787,7 +842,25 @@ def app_api_files_local():
     fd = request.files["file"]
 
     try:
-        web.util.upload_file_to_printer(app, fd)
+        outcome = _stage_and_start_print(fd)
+        if outcome is None:
+            web.util.upload_file_to_printer(app, fd)
+        elif outcome.status == "rejected":
+            # Shown verbatim in the slicer, so name the action and the reason
+            # the server refused it.
+            cli.util.http_abort(
+                409,
+                "Print was not started.\n"
+                "\n"
+                f"The print-start action was rejected: {outcome.reason}"
+            )
+    except ArtifactError as E:
+        cli.util.http_abort(
+            400,
+            "Print was not started.\n"
+            "\n"
+            f"The upload could not be staged: {E.reason}"
+        )
     except ConnectionError as E:
         log.error(f"Connection error: {E}")
         # This message will be shown in i.e. PrusaSlicer, so attempt to
@@ -849,10 +922,13 @@ def register_services(app):
         app.printer_actions = PrinterActions(
             snapshots=app.printer_snapshots,
             protocol=MqttActionProtocol(app),
+            transfers=PpppTransferProtocol(app),
+            artifacts=ArtifactStore(app.config["artifact_staging_path"]),
             journal_path=app.config["action_journal_path"],
             validation_mode=app.config["action_validation_mode"],
             validated_contracts=app.config["validated_action_contracts"],
             confirmation_timeout=app.config["action_confirmation_timeout"],
+            preparation_timeout=app.config["preprint_command_timeout"],
         )
 
 
