@@ -1,6 +1,6 @@
 # Session handoff
 
-Last updated: 2026-07-24
+Last updated: 2026-07-26
 
 ## Repository identity and GitHub targeting
 
@@ -20,6 +20,11 @@ Last updated: 2026-07-24
 - [`bigminer/ankermake-m5-protocol#15`](https://github.com/bigminer/ankermake-m5-protocol/issues/15)
   is the open **issue** “Supervised validation: thermal and fan actions”; there
   is no pull request #15 in the working repository.
+- `gh` is pinned to the fork via `gh repo set-default
+  bigminer/ankermake-m5-protocol`, which writes `remote.origin.gh-resolved` to
+  the untracked local `.git/config`. Without it `gh` resolves to `upstream`
+  (`anselor/...`) and reports that plainly existing PRs cannot be found. Re-run
+  it after a fresh clone or any `.git/config` reset.
 
 ## Current repository state
 
@@ -28,26 +33,31 @@ Last updated: 2026-07-24
   PR #20 joined the prior checkpoint-merge ancestry with the remaining
   `local-control` commits. The fully merged local and remote `local-control`
   branches were then deleted.
-- Working branch: `issue-10-thermal-fan-actions`, based directly on the unified
-  `main`.
-- The Issue 10 implementation and its 2026-07-23 attended validation evidence
-  are committed and pushed in draft
-  [`bigminer/ankermake-m5-protocol#21`](https://github.com/bigminer/ankermake-m5-protocol/pull/21).
-- Issue 10 now has typed nozzle-target, bed-target, heater-off, and fan actions;
-  server-owned validation, freshness, supersession, confirmation, journaling,
-  and contract gating; validation-mode browser integration; and deterministic
-  offline/browser coverage.
-- The attended thermal/fan run confirmed heater target telemetry,
-  same-resource supersession, independent nozzle/bed coordination, physical
-  fan on/off, and Protective heater-off from stale state. Issue 15 remains open
-  because the M5C has no numeric temperature display and exposes no fan-state
-  telemetry.
-- The macOS web service is running the local code. Named-action validation mode
-  was returned to `false`. Final observed printer state was state 0, nozzle
-  target 0, and bed target 0.
-- Current checks: 98 offline tests passed with 8 skipped; 27 browser tests
-  passed; JavaScript syntax, `git diff --check`, and the secret sweep passed.
-  Draft PR #21 is clean and mergeable, and all of its GitHub checks pass.
+- Working branch: `main`, at `df6f971`. No open pull requests. Three merged on
+  2026-07-26: [#21](https://github.com/bigminer/ankermake-m5-protocol/pull/21)
+  (thermal/fan actions plus two Protective fixes),
+  [#22](https://github.com/bigminer/ankermake-m5-protocol/pull/22) (per-action
+  contract ungating wired to configuration), and
+  [#23](https://github.com/bigminer/ankermake-m5-protocol/pull/23) (2026-07-26
+  validation evidence). Issue 10 is closed.
+- Issue 10 delivered typed nozzle-target, bed-target, heater-off, and fan
+  actions; server-owned validation, freshness, supersession, confirmation,
+  journaling, and contract gating; validation-mode browser integration; and
+  deterministic offline/browser coverage.
+- Two Protective defects were found in review and fixed in `367346a`: a
+  Protective Stop left pending heater targets to decay into
+  `confirmation_timeout` (they now become `superseded/protective_stop_submitted`),
+  and fan-off was gated on fresh state while heater-off was not. A pending *fan*
+  request is deliberately still left alone by Stop, because Stop sends only
+  `PRINT_CONTROL` and `M2024` and there is no evidence it halts the fan.
+- `ANKERCTL_VALIDATED_ACTION_CONTRACTS` (`5342fba`) ungates individual validated
+  actions. Before it, `ANKERCTL_ACTION_VALIDATION_MODE` was the only production
+  lever and is all-or-nothing: graduating one validated action would have
+  ungated unvalidated motion, upload, and print start at the same time. It fails
+  closed on a typo and never aborts startup; see the runbook section in
+  `documentation/local-macos-service.md`.
+- Checks on `main`: 105 offline tests pass with 8 skipped; 27 browser tests
+  pass; `git diff --check` and the secret sweep pass.
 - Origin branch cleanup removed `local-control`, `master`,
   `exiles-1.1-rebased`, `pyinstaller`, and `treitmayr_mqtt-commands` after
   verifying they were merged or had no unique patch content. The remaining
@@ -60,14 +70,19 @@ Last updated: 2026-07-24
 
 ## Current printer state
 
-- On 2026-07-24 the operator reported that the printer is online and that they
-  are physically present.
-- A read-only `APP_QUERY_STATUS` request returned fresh state 0, nozzle
-  22.00C/target 0, and bed 23.30C/target 0. This confirms current reachability,
-  idle state, and zero heater targets.
-- Named-action validation mode is `false`. The MQTT, PPPP, and file-transfer
-  services were stopped before the observation because they are lazy; the
-  read-only state websocket borrowed MQTT and obtained fresh printer telemetry.
+- An attended thermal/fan validation ran on 2026-07-26. The operator confirmed
+  presence, clear bed and toolhead path, and immediately accessible power before
+  any live command. Final read-only state after the run: state 0, nozzle
+  31.00C/target 0, bed 30.24C/target 0.
+- **The printer is gated.** `ANKERCTL_ACTION_VALIDATION_MODE` is `false` and
+  `ANKERCTL_VALIDATED_ACTION_CONTRACTS` is absent from the LaunchAgent, so every
+  named action returns `supervised_validation_required`. Verified after the run.
+- The run closed issue 15's criterion 3 for both heaters using an external
+  calibrated thermometer, which supplied the human observation the M5C's missing
+  numeric display had made impossible. The request-by-request ledger is in
+  [`documentation/printer-findings.md`](documentation/printer-findings.md); the
+  criteria table is in the
+  [issue 15 thread](https://github.com/bigminer/ankermake-m5-protocol/issues/15).
 - There is no active printer action. Operator presence alone is not clearance
   for motion, heating, fan, print, pause/resume, or stop. Before any such action,
   obtain fresh confirmation that the bed and toolhead path are clear, the
@@ -95,11 +110,52 @@ valid transfer acknowledgements but never became active jobs, so no named
 Pause/Resume/Stop action was sent. Final state was idle with both targets zero;
 the local validation-mode setting was returned to `false`.
 
+## Running a supervised validation
+
+Established 2026-07-26. The four remaining supervised validations (#9, #16, #17,
+#18) all need this same setup.
+
+**Do not enable validation mode by editing the LaunchAgent.** Run a temporary
+instance with the variable in its process environment instead:
+
+1. `launchctl bootout gui/$(id -u)/com.ankerctl.webserver`
+2. Read the plist's `EnvironmentVariables` with `plutil -convert json`, inject
+   them into `os.environ` without printing them, override
+   `ANKERCTL_ACTION_VALIDATION_MODE=true`, then `exec` `ankerctl.py --insecure
+   webserver run --host 127.0.0.1`
+3. Run the validation
+4. Kill the process, then `launchctl bootstrap gui/$(id -u) <plist>`
+
+Why this and not the plist: **ungating dies with the process.** The persistent
+configuration never leaves `false`, so an interrupted or abandoned run cannot
+leave the printer ungated — the failure mode the plist approach has. Binding
+loopback also keeps a temporarily ungated server off the network, where the
+plist uses `0.0.0.0`. Editing a LaunchAgent is also a system-configuration
+change that a coding agent should hand back to the operator rather than perform.
+
+Verify the gate before and after: a named action must return
+`supervised_validation_required` outside the run.
+
+Two conditions will otherwise waste a run. Both are detailed in
+[`documentation/printer-findings.md`](documentation/printer-findings.md):
+
+- **The M5C never publishes `state`** — only temperatures. `state` exists solely
+  as a reply to `APP_QUERY_STATUS` (1027) and goes stale 15s after a poll, so a
+  fan request fails its freshness gate unless status was polled immediately
+  before.
+- **The lazy MQTT service ages facts between short-lived connections.** Do a
+  warm-up `/ws/state` read immediately before submitting any action. This
+  invalidated one request on 2026-07-26 and one on 2026-07-23.
+
+**Physical observations need an established baseline.** A fan observation taken
+while the hotend is hot is not attributable, because the firmware runs its own
+hotend fan above a temperature threshold. Turn the heaters off and get the
+operator to confirm silence first, or the observation proves nothing.
+
 ## Session closeout and GitHub disposition
 
 There is no active monitoring, validation, or printer action to resume
-automatically. Issue 10 implementation work is published for review in draft
-PR #21.
+automatically.
 
 | Issue | Final session disposition |
 | --- | --- |
@@ -108,15 +164,46 @@ PR #21.
 | #7 — server-owned Printer snapshot | Closed completed |
 | #8 — Protective Stop tracer bullet | Closed completed for offline implementation; #9 retains live validation |
 | #9 — supervised Protective Stop | Open; synthetic attempt was invalid and no Stop was sent |
-| #10 — thermal and fan action migration | Implementation complete with passing offline/browser tests; published in draft PR #21 |
+| #10 — thermal and fan action migration | **Closed completed**; merged in PR #21 |
 | #11 — Pause/Resume migration | Closed completed for offline implementation; #16 retains live validation |
-| #15 — supervised thermal/fan validation | Open; bounded live behavior recorded, but numeric human heater observation and fan telemetry are unavailable |
+| #15 — supervised thermal/fan validation | Open, but only two items remain — see below |
 | #16 — supervised Pause/Resume | Open; synthetic attempt was invalid and neither action was sent |
 
-Issues #12-#19 remain open slices under #6; #15 has the partial evidence noted
-above. No claim is made that the whole parent design is complete. Earlier
-session history is now merged into `origin/main` through PR #20; the former
-`local-control` branch no longer exists.
+No claim is made that the whole parent design is complete.
+
+### Issue 15 — what is left
+
+Criterion 3 is met for nozzle and bed. Two items remain:
+
+1. **Criterion 7 is now reachable but not done.** Add to the LaunchAgent's
+   `EnvironmentVariables`, then unload/load:
+   `ANKERCTL_VALIDATED_ACTION_CONTRACTS="nozzle_target=m5c-nozzle-target-v1,bed_target=m5c-bed-target-v1,heater_off=m5c-heater-off-v1"`
+   That enables exactly the three actions with successful evidence and leaves
+   everything else gated. Issue 15 can close once this is set.
+2. **`fan_setting` is deliberately excluded, pending a decision.** It can never
+   reach `confirmed`, because the M5C publishes no fan-state fact: every request
+   resolves `indeterminate/confirmation_unavailable`, which the UI renders as a
+   warning. Physical operation is proven. Whether an action that always reports
+   uncertainty is acceptable for normal use is a product decision, not a
+   technical gap.
+
+### Next implementation work
+
+Dependency edges verified 2026-07-26:
+
+- **#14 (upload, preparation, print start) — unblocked**, and it became unblocked
+  when #10 closed. Its confirmation contract is already supported: `print.name`,
+  `print.origin`, `print.user_name`, `state`, and `print.progress` are all in
+  `FACT_PATHS` and all published. This is the recommended next slice.
+- **#12 (bounded jog) — unblocked but not ready to implement.** `FACT_PATHS` in
+  `web/printer_snapshot.py` has no position facts, and position is poll-only
+  (`M114`) — the same class of problem as `state`, except motion is where this
+  printer has twice driven its nozzle into the plate. There is nothing for a jog
+  action to confirm against, so the contract needs designing before any
+  implementation begins.
+- #13 is blocked by #12. #19 is blocked by #9, #15, and #16.
+- #9, #16, #17, and #18 are `ready-for-human`: they need the operator at the
+  printer and the validation setup described above.
 
 ## Mandatory safety rules
 
