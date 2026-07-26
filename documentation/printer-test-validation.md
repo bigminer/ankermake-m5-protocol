@@ -181,6 +181,9 @@ minimal value 0 payload plus `M2024`. Pause/Resume's `filePath` comes from
 print telemetry (1001 `name`), and `userName` is hardcoded `"ankerctl"`.
 Those identity fields must not be added to Stop.
 
+Commit `d1e7f0c` restored the exact minimal Stop payload plus `M2024` and added
+the browser regression coverage.
+
 Regression observed 2026-07-13: Stop had been routed through the shared
 Pause/Resume helper, producing value 0 plus `userName` and `filePath`. During a
 live print it failed to cancel the communication-module job; `M2024` cooled the

@@ -232,6 +232,17 @@ of it so far. Still: confirm telemetry is flowing before sending anything.
 Extra pressure on plate and gantry, nothing more. Do not describe these as crashes
 or imply damage — inflated framing distorted risk judgement for a whole session.
 
+**Containment commit trail:** `22c8bd3` disable unsafe standalone homing ·
+`14e34d2` block direct web Z homing · `e088c2c` attempted app-level Home, live
+test proved it unsafe · `12f726c` restore UI lockout and add the server-boundary
+rejection · `ffaea8c` remove homing from live-printer fixtures. A later normal
+print-start probed correctly after heating at a 220C nozzle / 60C bed target,
+which proves the physical probe works but **not** that standalone web homing is
+supported — the firmware's probing paths are guarded by internal
+homing/alignment state, so a raw homing opcode is not a complete
+probe-preparation sequence. Do not re-enable Home from another command or value
+guess.
+
 ### Firmware facts (read from source, V8110_DVT `Configuration.h` / `_adv.h`)
 
 Source: `github.com/eufymake/eufyMake-Marlin-M5C`, path
