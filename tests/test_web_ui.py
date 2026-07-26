@@ -7,7 +7,14 @@ from datetime import datetime
 from unittest import mock
 
 from cli.model import Account, Config, Printer
-from web import app, _require_token, _state_updates, ctrl_send_mqtt, ctrl_submit_action
+from web import (
+    app,
+    _parse_validated_contracts,
+    _require_token,
+    _state_updates,
+    ctrl_send_mqtt,
+    ctrl_submit_action,
+)
 from web.printer_actions import (
     BedTarget,
     FanSetting,
@@ -392,6 +399,31 @@ class WebUiTestCase(unittest.TestCase):
         self.assertEqual(submitted[0].printer_id, "printer-0")
         self.assertIsInstance(submitted[0].action, Pause)
         self.assertEqual(json.loads(socket.sent[0])["action"]["status"], "accepted")
+
+    def test_validated_contract_env_names_one_action_at_a_time(self):
+        self.assertEqual(
+            _parse_validated_contracts(
+                "nozzle_target=m5c-nozzle-target-v1,bed_target=m5c-bed-target-v1"
+            ),
+            {
+                "nozzle_target": "m5c-nozzle-target-v1",
+                "bed_target": "m5c-bed-target-v1",
+            },
+        )
+        self.assertEqual(
+            _parse_validated_contracts(" nozzle_target = m5c-nozzle-target-v1 "),
+            {"nozzle_target": "m5c-nozzle-target-v1"},
+        )
+
+    def test_malformed_validated_contract_env_fails_closed(self):
+        # A typo must leave the action gated, never abort webserver startup.
+        for raw in ("", "   ", "nozzle_target", "=m5c-nozzle-target-v1", "a,b,c", ","):
+            self.assertEqual(_parse_validated_contracts(raw), {})
+
+        self.assertEqual(
+            _parse_validated_contracts("garbage,bed_target=m5c-bed-target-v1"),
+            {"bed_target": "m5c-bed-target-v1"},
+        )
 
     def test_named_thermal_action_adapter_builds_typed_server_requests(self):
         app.config["printer_index"] = 0

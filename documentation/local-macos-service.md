@@ -165,10 +165,36 @@ Environment variables:
 | `ANKERCTL_MAX_UPLOAD_BYTES` | Largest accepted slicer upload | Defaults to 512 MiB; lower it if your profiles allow |
 | `ANKERCTL_PREPRINT_G36` | Experimental pre-upload preparation hook | Must remain `false` |
 | `ANKERCTL_PREPRINT_COMMAND_TIMEOUT` | Experimental hook timeout | Present but unused while hook is disabled |
-| `ANKERCTL_ACTION_VALIDATION_MODE` | Enables named print, thermal, and fan actions | Must remain `false` outside an attended validation |
+| `ANKERCTL_ACTION_VALIDATION_MODE` | Enables **every** named action at once | Must remain `false` outside an attended validation |
+| `ANKERCTL_VALIDATED_ACTION_CONTRACTS` | Ungates individual actions that passed supervised validation | Empty by default; see below |
 | `ANKERCTL_ACTION_CONFIRMATION_TIMEOUT` | Time allowed for telemetry confirmation | Defaults to 30 seconds |
 | `ANKERCTL_ACTION_JOURNAL_PATH` | Durable action-outcome journal | Optional; defaults to the user's local state directory |
 | `ANKERCTL_WEBCAM_URL` | Optional environment-level webcam URL | Not required when URL is saved in `default.json` |
+
+### Ungating a validated action
+
+`ANKERCTL_ACTION_VALIDATION_MODE=true` opens **every** named action at once,
+including ones nobody has validated. It is for attended runs only, and must be
+returned to `false` afterwards.
+
+To put a single action into normal service after its supervised validation
+passes, name the contract that validation established:
+
+```sh
+ANKERCTL_VALIDATED_ACTION_CONTRACTS="nozzle_target=m5c-nozzle-target-v1"
+```
+
+Comma-separate to enable more than one. The contract ids live in
+`_ACTION_CONTRACTS` in [`web/printer_actions.py`](../web/printer_actions.py).
+Two properties make this safe to leave set:
+
+- **It fails closed.** A typo, an unknown action name, or a malformed entry is
+  dropped and the action stays gated. It never aborts webserver startup.
+- **A changed contract re-gates its own action.** If an action's observable
+  contract is revised, the id here stops matching and that action alone
+  returns to gated until new evidence names the new value.
+
+Do not set this for an action whose supervised-validation issue is still open.
 
 Generate new secrets rather than reusing documented examples:
 

@@ -711,6 +711,47 @@ def test_obsolete_validation_evidence_does_not_ungate_changed_contract(tmp_path)
     assert protocol.effects == []
 
 
+def test_naming_one_validated_contract_ungates_only_that_action(tmp_path):
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock)
+    snapshots.observe(
+        "printer-0",
+        {"nozzle": {"current": 2000}, "bed": {"current": 2100}, "state": "idle"},
+    )
+    protocol = RecordingProtocol()
+    # The contract id is written out rather than imported: if the nozzle
+    # contract ever changes, this test must fail so the stale operator-facing
+    # value is caught instead of silently following the change.
+    actions = PrinterActions(
+        snapshots=snapshots,
+        protocol=protocol,
+        journal_path=tmp_path / "actions.jsonl",
+        clock=clock,
+        validation_mode=False,
+        validated_contracts={"nozzle_target": "m5c-nozzle-target-v1"},
+    )
+
+    nozzle = actions.submit(
+        ActionRequest("nozzle-40", "printer-0", NozzleTarget(celsius=40))
+    )
+    assert nozzle.status == "accepted"
+
+    # Ungating one validated action must not ungate any other.  This is the
+    # property ANKERCTL_ACTION_VALIDATION_MODE cannot provide, since it opens
+    # every action at once including unvalidated motion and print start.
+    for request_id, action in (
+        ("bed-1", BedTarget(celsius=35)),
+        ("fan-1", FanSetting(percent=50)),
+        ("off-1", HeaterOff(heater="all")),
+        ("stop-1", Stop()),
+    ):
+        outcome = actions.submit(ActionRequest(request_id, "printer-0", action))
+        assert outcome.status == "rejected", request_id
+        assert outcome.reason == "supervised_validation_required", request_id
+
+    assert protocol.effects == [("gcode", "printer-0", "M104 S40")]
+
+
 def test_protective_stop_supersedes_pending_heater_targets(tmp_path):
     clock = FakeClock()
     snapshots = PrinterSnapshots(clock=clock)
