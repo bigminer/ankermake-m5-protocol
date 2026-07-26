@@ -261,6 +261,29 @@ targets with telemetry. See the dated request-by-request ledger in
 all named thermal/fan actions remain gated for normal operation until those
 evidence limitations are explicitly resolved.
 
+A second attended run on 2026-07-26 resolved the heater half of that gap. An
+external calibrated thermometer (Thermapen Mk4, ±0.2C) replaced the missing
+numeric display: bed telemetry 34.96C read 95F against 94.9F, and nozzle
+telemetry 45.00C read 113F against 113.0F. Human observation and telemetry
+therefore agree for nozzle and bed targets, to within the instrument's displayed
+resolution and well inside the printer's own ~1.3C inter-sensor spread. The run
+also reconfirmed supersession, independent coordination, and Protective
+all-heaters-off, and validated Protective fan-off under stale state.
+
+The fan half remains bounded by the protocol, not by the fixture. Fan speed has
+no telemetry, so a fan request can only ever reach
+`indeterminate/confirmation_unavailable`; the 2026-07-26 run established
+attributable physical observations by first turning the heaters off and waiting
+for the operator to confirm silence, because the firmware runs its own hotend
+fan while the nozzle is hot. Any future fan evidence must use that silent
+baseline or it is not attributable.
+
+That run also established two operating conditions that any later validation
+must account for: the M5C never publishes `state` (it answers only
+`APP_QUERY_STATUS`, so state is stale within 15 seconds of a poll), and the lazy
+MQTT service ages facts between short-lived connections, so a warm-up read is
+required immediately before submitting an action.
+
 ## Expected Live Flow
 
 1. Confirm the bed is clear, filament path is safe, and an operator is present

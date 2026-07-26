@@ -478,6 +478,80 @@ final read-only status was printer state 0, nozzle 40.00C with target 0, and bed
 33.74C with target 0. The named thermal and fan actions remain gated for normal
 operation pending disposition of the issue #15 evidence gaps.
 
+### Thermal/fan validation with an external thermometer (2026-07-26)
+
+Second attended run on this M5C (V8110, firmware V3.1.56). Before the first live
+command the operator confirmed in-session that they were at the printer, the bed
+and toolhead path were clear, and physical power was immediately accessible. No
+motion, homing, upload, print start, or print-control action was attempted.
+
+**This run closes the criterion-3 gap the 2026-07-23 run could not.** The
+blocker was that the M5C has no numeric temperature display, so no human
+observation could be compared against heater telemetry. An external calibrated
+thermometer (Thermoworks Thermapen Mk4, ±0.2C, contact thermocouple) removed
+that limitation. Both heaters agree with telemetry to within the instrument's
+displayed resolution:
+
+| Sensor | Telemetry | Thermapen | Delta |
+| --- | --- | --- | --- |
+| Bed at 35C target | 34.96C / 94.9F | 95F | 0.1F |
+| Nozzle at 45C target | 45.00C / 113.0F | 113F | 0.0F |
+
+Two measurement caveats worth keeping. An **ambient** comparison before heating
+is nearly useless: bed, nozzle, and air are all genuinely at room temperature,
+so agreement there proves only that nothing is grossly wrong. It did produce a
+useful bound — the printer's own two sensors read 23.00C and 24.30C at a moment
+when they were physically identical, so **inter-sensor spread is ~1.3C and no
+agreement claim tighter than about ±2C is supportable** from this hardware. The
+setpoint readings above are far tighter than that, which says the instrument,
+not the printer, is the precise party. Contact technique matters: read the bed
+surface and the heater-block body, not the polished nozzle tip.
+
+| Request | Evidence | Status |
+| --- | --- | --- |
+| `issue15-20260726-gate-01` — fan 0% | first command after enabling validation mode; accepted where the identical request had been rejected minutes earlier | gate transition `CONFIRMED` |
+| `issue15-20260726-nozzle40-01` — nozzle 40C | rejected `fresh_nozzle_temperature_required`; infrastructure artifact, see lazy-MQTT note below | invalid fixture, no physical effect |
+| `issue15-20260726-nozzle45-01` — nozzle 45C | confirmed from new target telemetry; overshot to 56.00C before settling to exactly 45.00C and holding | target and heating response `CONFIRMED`; overshoot reproduces 2026-07-23 |
+| `issue15-20260726-bed35-01` — bed 35C | confirmed; nozzle target held at 45.00C throughout | independent resource coordination `CONFIRMED` |
+| `issue15-20260726-nozzle40-02` / `nozzle50-01` | 40C superseded by 50C with `newer_target_submitted`; 50C confirmed | same-resource supersession `CONFIRMED` |
+| `issue15-20260726-fan50-01` — fan 50% | rejected `fresh_printer_state_required`; see state-is-never-pushed note below | invalid fixture, no physical effect |
+| `issue15-20260726-fanoff-stale-01` — fan 0% | accepted under naturally stale state | Protective fan-off `CONFIRMED` |
+| `issue15-20260726-heatersoff-stale-01` — all heaters off | accepted from stale state, both targets became 0, confirmed | stale-state eligibility and shutdown `CONFIRMED` |
+| `issue15-20260726-fan50-02` — fan 50% | after an explicit status poll; operator heard the fan start from a silent baseline | physical operation `CONFIRMED`; telemetry confirmation unavailable |
+| `issue15-20260726-fan0-02` — fan 0% | stale state; operator heard the fan stop | physical operation `CONFIRMED`; telemetry confirmation unavailable |
+
+**The M5C never publishes `state`.** It pushes temperatures only. The `state`
+fact exists solely as a reply to `APP_QUERY_STATUS` (1027), so it is stale
+within the 15-second freshness window of any poll. `fan50-01` was rejected for
+exactly this reason while temperatures were fresh. Consequence: **a fan request
+in normal operation will fail its freshness gate unless something polls status
+immediately beforehand.** Stale state is the M5C's default condition, not an
+edge case — which is why fan-off must bypass that gate to remain reachable.
+Both fan-off requests above were accepted under naturally stale state with
+confirmed physical effect.
+
+**The lazy MQTT service ages facts between requests.** Short-lived websocket
+connections let the service stop, so the first action after an idle gap sees
+stale telemetry. This is what invalidated `nozzle40-01`. A warm-up state read
+immediately before submitting fixed it for every subsequent request. Same class
+of infrastructure artifact as the 2026-07-23 launchd reload gap: the action
+logic was never at fault in either case.
+
+**A fan observation taken while the hotend is hot cannot be attributed.** The
+firmware runs its own hotend cooling fan above a temperature threshold. An early
+report of hearing the fan "on and off" arrived while the nozzle was at 50C and
+while our only accepted fan command had been fan-*off* — so the sound cannot be
+credited to our request. The run therefore turned the heaters off, waited for
+the operator to confirm total silence, and only then commanded the fan. Both
+subsequent observations are attributable against that silent baseline.
+
+Validation mode was never written to the LaunchAgent for this run. The service
+was stopped and a temporary loopback-only instance was run with the variable set
+in its process environment, so **ungating died with the process** and the
+persistent configuration never left `false`. Post-run verification: the restored
+service rejected a named action with `supervised_validation_required`. Final
+read-only state was printer state 0, nozzle 31.00C target 0, bed 30.24C target 0.
+
 **Lesson worth more than any single reading: when this printer has a hard problem,
 the answer has repeatedly been its own physical interface or the runbook — not a
 command we inferred.** The button beat every opcode we considered.
