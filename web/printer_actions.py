@@ -14,6 +14,8 @@ from queue import Empty, Queue
 from threading import Event, Lock, Thread
 import time
 
+import web.util
+
 
 @dataclass(frozen=True)
 class Stop:
@@ -114,11 +116,10 @@ _JOB_ACTIONS = {"pause", "resume", "print_start"}
 
 _IDLE_STATES = {"idle", "stopped", "stop", "0", "4"}
 
-# Preparation limits are the M5C (V8110) firmware's own clamps, the same
-# derivation as the pre-print hook in ``web.util``.  They are deliberately
-# wider than the interactive NozzleTarget limit: a slicer's first-layer
-# temperature is a resolved print parameter, not a hand-typed one.
-_PREPARATION_LIMITS = {"bed": (1, 115), "nozzle": (150, 310)}
+# Preparation accepts the firmware's own clamps, which are deliberately wider
+# than the interactive NozzleTarget limit: a slicer's first-layer temperature
+# is a resolved print parameter, not a hand-typed one.
+_PREPARATION_LIMITS = web.util.FIRMWARE_TEMPERATURE_LIMITS
 
 # Tolerances that decided the pre-print hook's live-validated heat-up waits.
 _PREPARATION_TOLERANCE = {"bed": 0.5, "nozzle": 1.0}
@@ -187,11 +188,6 @@ class PrinterActions:
         self._locks = {}
         self._load_journal()
 
-    @property
-    def artifacts(self):
-        """The staging area callers use to obtain an artifact reference."""
-        return self._artifacts
-
     def is_enabled(self, kind):
         """Whether a named action is ungated for ordinary, unattended use."""
         return (
@@ -225,6 +221,15 @@ class PrinterActions:
         ) and self._pending_job_actions(request.printer_id):
             return self._rejected(request, "conflicting_job_action_pending")
 
+        # A preparing print owns both heaters for as long as it takes to reach
+        # its first-layer temperatures.  A newer ordinary target would override
+        # one of them and leave the preparation waiting for a temperature
+        # nothing is heating towards, so it is refused rather than accepted.
+        if isinstance(
+            request.action, (NozzleTarget, BedTarget)
+        ) and self._executing_compound_actions(request.printer_id):
+            return self._rejected(request, "conflicting_preparation_pending")
+
         resources = set(context.get("resources", ()))
 
         now = self._clock()
@@ -256,6 +261,13 @@ class PrinterActions:
             self._supersede_resource_targets(
                 request.printer_id, {"nozzle", "bed"}, "protective_stop_submitted"
             )
+        elif isinstance(request.action, HeaterOff):
+            # Heater-off is Protective and stays available during preparation,
+            # but preparation depends on the heat it removes.  Letting the
+            # Compound action continue would transfer and start a cold print.
+            for pending in self._executing_compound_actions(request.printer_id):
+                self._transition(pending, "superseded", "heaters_turned_off")
+                self._resolve(pending.request_id)
         if resources:
             self._supersede_resource_targets(
                 request.printer_id, resources, "newer_target_submitted"
@@ -587,6 +599,15 @@ class PrinterActions:
                 pending[request_id] = record
         return list(pending.values())
 
+    def _executing_compound_actions(self, printer_id):
+        """Compound actions still running their own protocol sequence."""
+        executing = []
+        for request_id in list(self._aborts):
+            record = self._records.get(request_id)
+            if record is not None and record.printer_id == printer_id:
+                executing.append(record)
+        return executing
+
     def _resolve(self, request_id):
         """Retire one request, cancelling any Compound action still running."""
         self._deadlines.pop(request_id, None)
@@ -779,6 +800,12 @@ class PrinterActions:
             self._snapshots.record_action(outcome.printer_id, outcome)
 
 
+def _require_selected_printer(app, printer_id):
+    """Both production adapters act only on the printer the server selected."""
+    if printer_id != f"printer-{app.config['printer_index']}":
+        raise ValueError("printer is not selected")
+
+
 def _run_in_background(work):
     Thread(target=work, daemon=True).start()
 
@@ -796,7 +823,7 @@ class MqttActionProtocol:
         Waiting happens only after both effects have been sent.  The reply is
         diagnostic acknowledgement, never physical-action confirmation.
         """
-        self._require_selected_printer(printer_id)
+        _require_selected_printer(self._app, printer_id)
         with self._app.svc.borrow("mqttqueue") as mqtt:
             replies = Queue()
             with mqtt.tap(replies.put):
@@ -829,7 +856,7 @@ class MqttActionProtocol:
         uploaded G-code.  M400 queues behind it and supplies the terminal "ok"
         only once probing has finished.
         """
-        self._require_selected_printer(printer_id)
+        _require_selected_printer(self._app, printer_id)
         with self._app.svc.borrow("mqttqueue") as mqtt:
             replies = Queue()
             with mqtt.tap(replies.put):
@@ -857,7 +884,7 @@ class MqttActionProtocol:
                         return
 
     def mqtt(self, printer_id, message):
-        self._require_selected_printer(printer_id)
+        _require_selected_printer(self._app, printer_id)
         with self._app.svc.borrow("mqttqueue") as mqtt:
             return mqtt.transport.command(message)
 
@@ -868,10 +895,6 @@ class MqttActionProtocol:
     def _gcode_message(line):
         return {"commandType": 0x0413, "cmdData": line, "cmdLen": len(line)}
 
-    def _require_selected_printer(self, printer_id):
-        selected = f"printer-{self._app.config['printer_index']}"
-        if printer_id != selected:
-            raise ValueError("printer is not selected")
 
 
 class PpppTransferProtocol:
@@ -887,14 +910,10 @@ class PpppTransferProtocol:
 
     @contextmanager
     def session(self, printer_id):
-        self._require_selected_printer(printer_id)
+        _require_selected_printer(self._app, printer_id)
         with self._app.svc.borrow("filetransfer") as filetransfer:
             yield _PpppTransferSession(filetransfer)
 
-    def _require_selected_printer(self, printer_id):
-        selected = f"printer-{self._app.config['printer_index']}"
-        if printer_id != selected:
-            raise ValueError("printer is not selected")
 
 
 class _PpppTransferSession:

@@ -117,6 +117,7 @@ class WebUiTestCase(unittest.TestCase):
         self.old_preprint_g36 = app.config.get("preprint_g36")
         self.old_svc = app.svc
         self.old_printer_snapshots = getattr(app, "printer_snapshots", None)
+        self.old_printer_artifacts = getattr(app, "printer_artifacts", None)
         self.old_printer_actions = getattr(app, "printer_actions", None)
 
         app.config["TESTING"] = True
@@ -142,6 +143,7 @@ class WebUiTestCase(unittest.TestCase):
         app.config["preprint_g36"] = self.old_preprint_g36
         app.svc = self.old_svc
         app.printer_snapshots = self.old_printer_snapshots
+        app.printer_artifacts = self.old_printer_artifacts
         app.printer_actions = self.old_printer_actions
 
     def test_root_without_token_is_available(self):
@@ -291,8 +293,9 @@ class WebUiTestCase(unittest.TestCase):
         submitted = []
 
         class FakeActions:
-            artifacts = ArtifactStore(staging.name)
-            outcome = SimpleNamespace(status="accepted", reason=None)
+            outcome = SimpleNamespace(
+                status="accepted", reason=None, request_id="print-1"
+            )
 
             def is_enabled(self, kind):
                 return kind == "print_start"
@@ -303,6 +306,7 @@ class WebUiTestCase(unittest.TestCase):
 
         actions = FakeActions()
         app.printer_actions = actions
+        app.printer_artifacts = ArtifactStore(staging.name)
         return actions, submitted
 
     def test_slicer_upload_submits_a_named_print_start_action(self):
@@ -316,12 +320,16 @@ class WebUiTestCase(unittest.TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json, {})
+        # Named-action status, not a bare success: the slicer learns the print
+        # was accepted, which is not the same as started.
+        self.assertEqual(resp.json["ankerctl"]["action"], "print_start")
+        self.assertEqual(resp.json["ankerctl"]["status"], "accepted")
+        self.assertEqual(resp.json["ankerctl"]["requestId"], "print-1")
         self.assertEqual(len(submitted), 1)
         self.assertEqual(submitted[0].printer_id, "printer-0")
         self.assertIsInstance(submitted[0].action, PrintStart)
 
-        artifact = actions.artifacts.get(submitted[0].action.artifact)
+        artifact = app.printer_artifacts.get(submitted[0].action.artifact)
         # Identity and name are server-derived; the request body chose neither.
         self.assertEqual(artifact.name, "cube_v2.gcode")
         self.assertEqual(artifact.user_name, "OrcaSlicer")
@@ -372,6 +380,8 @@ class WebUiTestCase(unittest.TestCase):
         with self.client.session_transaction() as sess:
             self.assertEqual(sess["_flashes"][-1][0], "info")
             self.assertIn("Print start accepted", sess["_flashes"][-1][1])
+            # Acceptance must not be rendered as a started print.
+            self.assertNotIn("sent to printer", sess["_flashes"][-1][1])
 
         actions.outcome = SimpleNamespace(
             status="rejected", reason="supervised_validation_required"

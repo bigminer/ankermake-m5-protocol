@@ -15,6 +15,8 @@ import pytest
 
 from web.printer_actions import (
     ActionRequest,
+    FanSetting,
+    HeaterOff,
     NozzleTarget,
     PrintStart,
     PrinterActions,
@@ -144,10 +146,11 @@ def build(
     tmp_path, clock, snapshots, *, protocol, transfers, sleep=None,
     run_async=lambda work: work(), **kwargs,
 ):
-    return PrinterActions(
+    store = ArtifactStore(tmp_path / "staging")
+    actions = PrinterActions(
         snapshots=snapshots,
         protocol=protocol,
-        artifacts=ArtifactStore(tmp_path / "staging"),
+        artifacts=store,
         transfers=transfers,
         journal_path=tmp_path / "actions.jsonl",
         clock=clock,
@@ -156,6 +159,10 @@ def build(
         validation_mode=True,
         **kwargs,
     )
+    # The store is a collaborator both the module and the route adapter hold,
+    # not part of the module's interface.  Tests keep their own handle on it.
+    actions.store = store
+    return actions
 
 
 @pytest.fixture
@@ -186,7 +193,7 @@ def test_prepared_print_runs_the_compound_sequence_in_order(world):
         world["tmp_path"], clock, snapshots,
         protocol=world["protocol"], transfers=world["transfers"], sleep=sleep,
     )
-    artifact = stage(actions.artifacts)
+    artifact = stage(actions.store)
 
     accepted = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
@@ -213,7 +220,7 @@ def test_unprepared_print_transfers_and_starts_without_heating(world):
         world["tmp_path"], world["clock"], world["snapshots"],
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
 
     actions.submit(ActionRequest("print-1", "printer-0", PrintStart(artifact.reference)))
 
@@ -231,7 +238,7 @@ def test_print_start_confirms_from_observed_job_state(world):
         world["tmp_path"], clock, snapshots,
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
     actions.submit(ActionRequest("print-1", "printer-0", PrintStart(artifact.reference)))
 
     assert next(actions.watch(Watch("printer-0"))).actions["print-1"].reason == (
@@ -257,7 +264,7 @@ def test_unconfirmed_print_start_becomes_indeterminate(world):
         protocol=world["protocol"], transfers=world["transfers"],
         confirmation_timeout=30,
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
     actions.submit(ActionRequest("print-1", "printer-0", PrintStart(artifact.reference)))
 
     clock.now += 31
@@ -285,7 +292,7 @@ def test_policy_rejects_before_any_physical_effect(world, observation, reason):
         world["tmp_path"], clock, snapshots,
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts)
+    artifact = stage(actions.store)
 
     outcome = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
@@ -295,7 +302,7 @@ def test_policy_rejects_before_any_physical_effect(world, observation, reason):
     assert outcome.reason == reason
     assert world["effects"] == []
     # A rejected request never consumes the artifact, so the caller may retry.
-    assert actions.artifacts.get(artifact.reference) is not None
+    assert actions.store.get(artifact.reference) is not None
 
 
 def test_policy_rejects_an_unknown_or_already_consumed_artifact(world):
@@ -303,7 +310,7 @@ def test_policy_rejects_an_unknown_or_already_consumed_artifact(world):
         world["tmp_path"], world["clock"], world["snapshots"],
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
     actions.submit(ActionRequest("print-1", "printer-0", PrintStart(artifact.reference)))
     world["effects"].clear()
 
@@ -324,7 +331,7 @@ def test_policy_rejects_unsupported_preparation_temperatures(world):
         world["tmp_path"], world["clock"], world["snapshots"],
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"M190 S55\nM109 S500\n")
+    artifact = stage(actions.store, b"M190 S55\nM109 S500\n")
 
     outcome = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
@@ -343,7 +350,7 @@ def test_preparation_timeout_cleans_up_and_reports_indeterminate(world):
         protocol=world["protocol"], transfers=world["transfers"], sleep=sleep,
         preparation_timeout=60,
     )
-    artifact = stage(actions.artifacts)
+    artifact = stage(actions.store)
 
     outcome = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
@@ -356,7 +363,7 @@ def test_preparation_timeout_cleans_up_and_reports_indeterminate(world):
         ("gcode", "printer-0", "M140 S0"),
     ]
     assert ("transfer_open", "printer-0") not in world["effects"]
-    assert actions.artifacts.get(artifact.reference) is None
+    assert actions.store.get(artifact.reference) is None
 
 
 def test_failed_preparation_routine_cleans_up_before_transfer(world):
@@ -370,7 +377,7 @@ def test_failed_preparation_routine_cleans_up_before_transfer(world):
         world["tmp_path"], clock, snapshots,
         protocol=world["protocol"], transfers=world["transfers"], sleep=sleep,
     )
-    artifact = stage(actions.artifacts)
+    artifact = stage(actions.store)
 
     outcome = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
@@ -383,7 +390,7 @@ def test_failed_preparation_routine_cleans_up_before_transfer(world):
         ("gcode", "printer-0", "M104 S0"),
         ("gcode", "printer-0", "M140 S0"),
     ]
-    assert actions.artifacts.get(artifact.reference) is None
+    assert actions.store.get(artifact.reference) is None
 
 
 def test_disconnect_during_transfer_is_indeterminate_and_cleans_up(world):
@@ -392,7 +399,7 @@ def test_disconnect_during_transfer_is_indeterminate_and_cleans_up(world):
         world["tmp_path"], world["clock"], world["snapshots"],
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
 
     outcome = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
@@ -401,7 +408,7 @@ def test_disconnect_during_transfer_is_indeterminate_and_cleans_up(world):
     assert outcome.status == "indeterminate"
     assert outcome.reason == "transfer_failed"
     assert ("start", "printer-0", "transfer-handle") not in world["effects"]
-    assert actions.artifacts.get(artifact.reference) is None
+    assert actions.store.get(artifact.reference) is None
 
 
 def test_failed_start_submission_is_indeterminate(world):
@@ -410,7 +417,7 @@ def test_failed_start_submission_is_indeterminate(world):
         world["tmp_path"], world["clock"], world["snapshots"],
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
 
     outcome = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
@@ -418,7 +425,7 @@ def test_failed_start_submission_is_indeterminate(world):
 
     assert outcome.status == "indeterminate"
     assert outcome.reason == "transfer_failed"
-    assert actions.artifacts.get(artifact.reference) is None
+    assert actions.store.get(artifact.reference) is None
 
 
 def test_protective_stop_cancels_a_preparing_print_and_cleans_up(world):
@@ -435,7 +442,7 @@ def test_protective_stop_cancels_a_preparing_print_and_cleans_up(world):
         sleep=stop_during_preparation,
     )
     running["actions"] = actions
-    artifact = stage(actions.artifacts)
+    artifact = stage(actions.store)
 
     actions.submit(ActionRequest("print-1", "printer-0", PrintStart(artifact.reference)))
 
@@ -443,7 +450,7 @@ def test_protective_stop_cancels_a_preparing_print_and_cleans_up(world):
     assert current.actions["print-1"].status == "superseded"
     assert current.actions["print-1"].reason == "protective_stop_submitted"
     assert ("transfer_open", "printer-0") not in world["effects"]
-    assert actions.artifacts.get(artifact.reference) is None
+    assert actions.store.get(artifact.reference) is None
 
 
 def test_a_stop_during_transfer_keeps_the_superseded_outcome(world):
@@ -453,7 +460,7 @@ def test_a_stop_during_transfer_keeps_the_superseded_outcome(world):
         world["tmp_path"], world["clock"], world["snapshots"],
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
 
     inside_transfer = threading.Event()
     release_transfer = threading.Event()
@@ -482,7 +489,7 @@ def test_a_stop_during_transfer_keeps_the_superseded_outcome(world):
     current = next(actions.watch(Watch("printer-0"))).actions
     assert current["print-1"].status == "superseded"
     assert current["print-1"].reason == "protective_stop_submitted"
-    assert actions.artifacts.get(artifact.reference) is None
+    assert actions.store.get(artifact.reference) is None
 
 
 def _wait_for_status(actions, request_id, status, timeout=2.0):
@@ -500,8 +507,8 @@ def test_a_second_print_start_is_rejected_while_one_is_unresolved(world):
         world["tmp_path"], world["clock"], world["snapshots"],
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    first = stage(actions.artifacts, b"one", "one.acode", prepare=False)
-    second = stage(actions.artifacts, b"two", "two.acode", prepare=False)
+    first = stage(actions.store, b"one", "one.acode", prepare=False)
+    second = stage(actions.store, b"two", "two.acode", prepare=False)
     actions.submit(ActionRequest("print-1", "printer-0", PrintStart(first.reference)))
     world["effects"].clear()
 
@@ -519,12 +526,12 @@ def test_identical_retry_is_deduplicated_and_mismatched_reuse_rejected(world):
         world["tmp_path"], world["clock"], world["snapshots"],
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
     request = ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
 
     first = actions.submit(request)
     retry = actions.submit(request)
-    other = stage(actions.artifacts, b"other", "other.acode", prepare=False)
+    other = stage(actions.store, b"other", "other.acode", prepare=False)
     conflict = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(other.reference))
     )
@@ -541,7 +548,7 @@ def test_restart_never_replays_an_unresolved_print_start(world):
         tmp_path, clock, snapshots,
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
     actions.submit(ActionRequest("print-1", "printer-0", PrintStart(artifact.reference)))
 
     restarted_effects = []
@@ -567,7 +574,7 @@ def test_a_reconnecting_watcher_resumes_print_start_transitions_from_a_cursor(wo
         world["tmp_path"], clock, snapshots,
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
     cursor = next(actions.watch(Watch("printer-0"))).cursor
 
     actions.submit(ActionRequest("print-1", "printer-0", PrintStart(artifact.reference)))
@@ -593,7 +600,7 @@ def test_the_journal_records_only_the_opaque_reference(world):
         protocol=world["protocol"], transfers=world["transfers"],
     )
     artifact = stage(
-        actions.artifacts,
+        actions.store,
         b"G1 X1 ; secret geometry\n",
         r"C:\Users\someone\Desktop\confidential part.acode",
         prepare=False,
@@ -610,16 +617,17 @@ def test_the_journal_records_only_the_opaque_reference(world):
 
 
 def test_print_start_is_gated_until_its_contract_is_validated(world):
+    store = ArtifactStore(world["tmp_path"] / "staging")
     actions = PrinterActions(
         snapshots=world["snapshots"],
         protocol=world["protocol"],
         transfers=world["transfers"],
-        artifacts=ArtifactStore(world["tmp_path"] / "staging"),
+        artifacts=store,
         journal_path=world["tmp_path"] / "actions.jsonl",
         clock=world["clock"],
         run_async=lambda work: work(),
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(store, b"binary acode", "model.acode", prepare=False)
 
     outcome = actions.submit(
         ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
@@ -637,7 +645,7 @@ def test_unrelated_actions_do_not_interleave_with_transfer_and_start(world):
         world["tmp_path"], clock, snapshots,
         protocol=world["protocol"], transfers=world["transfers"],
     )
-    artifact = stage(actions.artifacts, b"binary acode", "model.acode", prepare=False)
+    artifact = stage(actions.store, b"binary acode", "model.acode", prepare=False)
 
     inside_transfer = threading.Event()
     release_transfer = threading.Event()
@@ -652,19 +660,89 @@ def test_unrelated_actions_do_not_interleave_with_transfer_and_start(world):
     printing.start()
     assert inside_transfer.wait(2)
 
-    heating = threading.Thread(
+    # The fan is unrelated to a print start, so nothing but the protocol lock
+    # keeps it out of the transfer-then-start boundary.
+    fan = threading.Thread(
         target=actions.submit,
-        args=(ActionRequest("nozzle-1", "printer-0", NozzleTarget(celsius=200)),),
+        args=(ActionRequest("fan-1", "printer-0", FanSetting(percent=100)),),
     )
-    heating.start()
-    heating.join(0.2)
-    assert heating.is_alive(), "an unrelated action entered the transfer boundary"
-    assert ("gcode", "printer-0", "M104 S200") not in world["effects"]
+    fan.start()
+    fan.join(0.2)
+    assert fan.is_alive(), "an unrelated action entered the transfer boundary"
+    assert ("gcode", "printer-0", "M106 S255") not in world["effects"]
 
     release_transfer.set()
     printing.join(2)
-    heating.join(2)
+    fan.join(2)
 
-    assert world["effects"].index(("gcode", "printer-0", "M104 S200")) > world[
+    assert world["effects"].index(("gcode", "printer-0", "M106 S255")) > world[
         "effects"
     ].index(("start", "printer-0", "transfer-handle"))
+
+
+def test_a_heater_target_cannot_override_a_running_preparation(world):
+    clock, snapshots = world["clock"], world["snapshots"]
+    running = {}
+    rejected = []
+
+    def retarget_during_preparation(seconds):
+        clock.now += seconds
+        if not rejected:
+            rejected.append(running["actions"].submit(
+                ActionRequest("nozzle-1", "printer-0", NozzleTarget(celsius=200))
+            ))
+
+    sleep = Preheating(clock, snapshots, schedule=[
+        {"bed": {"current": 5500}},
+        {"nozzle": {"current": 22000}},
+    ])
+
+    def preparing(seconds):
+        retarget_during_preparation(0)
+        sleep(seconds)
+
+    actions = build(
+        world["tmp_path"], clock, snapshots,
+        protocol=world["protocol"], transfers=world["transfers"], sleep=preparing,
+    )
+    running["actions"] = actions
+    artifact = stage(actions.store)
+
+    outcome = actions.submit(
+        ActionRequest("print-1", "printer-0", PrintStart(artifact.reference))
+    )
+
+    assert rejected[0].status == "rejected"
+    assert rejected[0].reason == "conflicting_preparation_pending"
+    assert ("gcode", "printer-0", "M104 S200") not in world["effects"]
+    # The preparation reached its own targets and the print still started.
+    assert outcome.status == "accepted"
+    assert ("start", "printer-0", "transfer-handle") in world["effects"]
+
+
+def test_turning_the_heaters_off_cancels_a_preparing_print(world):
+    clock, snapshots = world["clock"], world["snapshots"]
+    running = {}
+
+    def heaters_off_during_preparation(seconds):
+        clock.now += seconds
+        running["actions"].submit(
+            ActionRequest("off-1", "printer-0", HeaterOff(heater="all"))
+        )
+
+    actions = build(
+        world["tmp_path"], clock, snapshots,
+        protocol=world["protocol"], transfers=world["transfers"],
+        sleep=heaters_off_during_preparation,
+    )
+    running["actions"] = actions
+    artifact = stage(actions.store)
+
+    actions.submit(ActionRequest("print-1", "printer-0", PrintStart(artifact.reference)))
+
+    current = next(actions.watch(Watch("printer-0"))).actions
+    assert current["print-1"].status == "superseded"
+    assert current["print-1"].reason == "heaters_turned_off"
+    # A cold print must never be transferred or started.
+    assert ("transfer_open", "printer-0") not in world["effects"]
+    assert actions.store.get(artifact.reference) is None

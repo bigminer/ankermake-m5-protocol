@@ -153,6 +153,7 @@ app.config["artifact_staging_path"] = os.environ.get(
 
 app.svc = ServiceManager()
 app.printer_snapshots = PrinterSnapshots()
+app.printer_artifacts = ArtifactStore(app.config["artifact_staging_path"])
 app.printer_actions = None
 
 sock = Sock(app)
@@ -768,7 +769,7 @@ def _stage_and_start_print(file):
         return None
 
     user_name, origin = web.util.upload_identity()
-    artifact = actions.artifacts.stage(
+    artifact = app.printer_artifacts.stage(
         file,
         user_name=user_name,
         origin=origin,
@@ -776,7 +777,9 @@ def _stage_and_start_print(file):
     )
     outcome = actions.submit(ActionRequest(
         # An HTTP upload carries no request identity of its own, so the server
-        # mints one.  Resubmitting a file is a new physical request.
+        # mints one.  Re-uploading is a new physical request; a duplicate that
+        # would repeat a physical effect is caught by the action's own
+        # conflicting-job and idle-printer policy instead.
         request_id=str(uuid4()),
         printer_id=f"printer-{app.config['printer_index']}",
         action=PrintStart(artifact=artifact.reference),
@@ -784,7 +787,7 @@ def _stage_and_start_print(file):
     if outcome.status == "rejected":
         # A rejection proves the action never took the artifact, and an HTTP
         # caller keeps no reference to retry with.
-        actions.artifacts.discard(artifact.reference)
+        app.printer_artifacts.discard(artifact.reference)
     return outcome
 
 
@@ -806,9 +809,12 @@ def app_api_ankerctl_file_upload():
             return web.util.flash_redirect(
                 url_for('app_root'),
                 f"Print was not started: {outcome.reason}", "danger")
+        # Acceptance is not confirmation: preparation, transfer, and start are
+        # still ahead, and their outcome arrives on the action stream below.
         return web.util.flash_redirect(
             url_for('app_root'),
-            "Print start accepted — awaiting printer confirmation.", "info")
+            "Print start accepted — follow its progress on the Print tab.",
+            "info")
     except ArtifactError as err:
         return web.util.flash_redirect(url_for('app_root'),
                                        f"Print was not started: {err.reason}", "danger")
@@ -845,6 +851,14 @@ def app_api_files_local():
         outcome = _stage_and_start_print(fd)
         if outcome is None:
             web.util.upload_file_to_printer(app, fd)
+        elif outcome.status == "accepted":
+            # Acceptance, not confirmation.  The request id lets a caller that
+            # keeps one correlate the outcome that arrives later.
+            return {"ankerctl": {
+                "action": "print_start",
+                "requestId": outcome.request_id,
+                "status": outcome.status,
+            }}
         elif outcome.status == "rejected":
             # Shown verbatim in the slicer, so name the action and the reason
             # the server refused it.
@@ -923,7 +937,7 @@ def register_services(app):
             snapshots=app.printer_snapshots,
             protocol=MqttActionProtocol(app),
             transfers=PpppTransferProtocol(app),
-            artifacts=ArtifactStore(app.config["artifact_staging_path"]),
+            artifacts=app.printer_artifacts,
             journal_path=app.config["action_journal_path"],
             validation_mode=app.config["action_validation_mode"],
             validated_contracts=app.config["validated_action_contracts"],

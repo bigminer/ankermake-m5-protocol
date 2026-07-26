@@ -44,3 +44,15 @@ _Avoid_: Attended action, permanent supervision
 **Printer snapshot**:
 The latest set of facts observed about a printer, including when each fact was observed. A snapshot may contain stale or unknown facts and does not by itself prove the printer's current physical state.
 _Avoid_: Live state, current state
+
+**Staged artifact**:
+An upload the server has taken custody of, named by an opaque reference and described only by metadata the server derived itself. The reference identifies the artifact without disclosing its contents or the path it came from.
+_Avoid_: File, upload, path
+
+**Preparation**:
+The heating and bed-conditioning a printer must complete before a print can start. Preparation has physical effect, so a failure after it begins leaves the printer changed.
+_Avoid_: Warm-up, pre-print hook
+
+**Transfer**:
+Delivery of a staged artifact's contents to the printer. Transfer is separate from the submission that starts the print, and neither is evidence that printing began.
+_Avoid_: Upload, print start

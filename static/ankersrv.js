@@ -534,9 +534,13 @@ $(function () {
                     ? `${label} could not be confirmed. Use the printer's physical controls; remove power if motion remains hazardous.`
                     : `${label} could not be confirmed: ${action.reason}.`);
         } else if (action.status === "superseded") {
+            const supersededBy = {
+                protective_stop_submitted: "the protective Stop request",
+                heaters_turned_off: "turning the heaters off",
+            };
             status.attr("class", "small text-warning mb-0 mt-3")
-                .text(action.reason === "protective_stop_submitted"
-                    ? `${label} was superseded by the protective Stop request.`
+                .text(supersededBy[action.reason]
+                    ? `${label} was superseded by ${supersededBy[action.reason]}.`
                     : `${label} was superseded by a newer request.`);
         } else if (action.status === "rejected") {
             status.attr("class", "small text-danger mb-0 mt-3")

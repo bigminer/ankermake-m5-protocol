@@ -16,10 +16,16 @@ _NOZZLE_TEMPERATURE = MqttMsgType.ZZ_MQTT_CMD_NOZZLE_TEMP.value
 _BED_TEMPERATURE = MqttMsgType.ZZ_MQTT_CMD_HOTBED_TEMP.value
 # Limits derived from the M5C (V8110) Marlin firmware Configuration.h:
 # BED_MAXTEMP 125 / HEATER_0_MAXTEMP 325, minus Marlin's standard
-# BED_OVERSHOOT (10) / HOTEND_OVERSHOOT (15) target clamps.
+# BED_OVERSHOOT (10) / HOTEND_OVERSHOOT (15) target clamps.  This is the one
+# definition; the print-start action's preparation policy reads it rather than
+# restating a physical-safety constant that could drift.
+FIRMWARE_TEMPERATURE_LIMITS = {
+    "bed": (1, 115),
+    "nozzle": (150, 310),
+}
 _TEMPERATURE_LIMITS = {
-    "M190": (1, 115),
-    "M109": (150, 310),
+    "M190": FIRMWARE_TEMPERATURE_LIMITS["bed"],
+    "M109": FIRMWARE_TEMPERATURE_LIMITS["nozzle"],
 }
 
 

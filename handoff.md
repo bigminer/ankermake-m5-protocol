@@ -33,7 +33,10 @@ Last updated: 2026-07-26
   PR #20 joined the prior checkpoint-merge ancestry with the remaining
   `local-control` commits. The fully merged local and remote `local-control`
   branches were then deleted.
-- Working branch: `main`, at `df6f971`. No open pull requests. Three merged on
+- Working branch: `issue-14-upload-print-start`, one commit ahead of `main`.
+  It implements issue 14 (upload, preparation, print start) as a staged
+  Compound action. Not yet pushed and no pull request opened.
+- Before that, `main` was at `df6f971`. Three PRs merged on
   2026-07-26: [#21](https://github.com/bigminer/ankermake-m5-protocol/pull/21)
   (thermal/fan actions plus two Protective fixes),
   [#22](https://github.com/bigminer/ankermake-m5-protocol/pull/22) (per-action
@@ -230,14 +233,32 @@ after removing it.
 and validated, including Protective fan-off under stale state. This is entirely
 a question of how the outcome is presented.
 
+### Issue 14 — implemented offline, awaiting validation
+
+Contract `m5c-print-start-v1`, gated. The action order, policy, and cleanup
+rules are documented in the "`print_start` Compound action order" section of
+[`documentation/printer-test-validation.md`](documentation/printer-test-validation.md);
+issue [#18](https://github.com/bigminer/ankermake-m5-protocol/issues/18) is the
+supervised validation that would ungate it.
+
+Two things a reviewer should know:
+
+- **Both upload routes still take the legacy path while the action is gated**,
+  which is every deployment today. Nothing about normal printing changed. The
+  named path only engages under validation mode or a matching contract.
+- **The named path returns to the slicer on acceptance, not on transfer.**
+  That is the intended acceptance/confirmation split, but it means a slicer no
+  longer learns about a transfer failure from its own HTTP response — only the
+  browser, which watches the action stream, sees the outcome. Worth deciding
+  before #19 contracts the legacy path away.
+
+`G36` is still not honored by production firmware, so a supervised run should
+validate the unprepared path first with `ANKERCTL_PREPRINT_G36` `false`.
+
 ### Next implementation work
 
 Dependency edges verified 2026-07-26:
 
-- **#14 (upload, preparation, print start) — unblocked**, and it became unblocked
-  when #10 closed. Its confirmation contract is already supported: `print.name`,
-  `print.origin`, `print.user_name`, `state`, and `print.progress` are all in
-  `FACT_PATHS` and all published. This is the recommended next slice.
 - **#12 (bounded jog) — unblocked but not ready to implement.** `FACT_PATHS` in
   `web/printer_snapshot.py` has no position facts, and position is poll-only
   (`M114`) — the same class of problem as `state`, except motion is where this

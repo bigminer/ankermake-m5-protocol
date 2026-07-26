@@ -22,6 +22,10 @@ import web.util
 _PREAMBLE_BYTES = 256 * 1024
 _READ_BLOCK = 64 * 1024
 
+# Staged files carry a suffix so a restart can recognise its own leftovers
+# without touching anything else in the configured directory.
+_SUFFIX = ".staged"
+
 
 class ArtifactError(ValueError):
     """Staging refused the upload; nothing was submitted to the printer."""
@@ -64,21 +68,26 @@ class ArtifactStore:
         self._purge()
 
     def _purge(self):
-        """Drop artifacts left by a previous process.
+        """Drop artifacts this store's own previous process left behind.
 
         References live only in memory and the server never replays an action
-        after restart, so anything already on disk is unreachable content that
-        would otherwise accumulate.
+        after restart, so a file we staged is unreachable content that would
+        otherwise accumulate.  Only our own suffix is removed: the staging
+        directory is operator-configurable, and pointing it somewhere populated
+        must not destroy anything we did not write.
         """
         if not self._root.is_dir():
             return
-        for path in self._root.iterdir():
+        for path in self._root.glob(f"*{_SUFFIX}"):
             if not path.is_file():
                 continue
             try:
                 path.unlink()
             except OSError:
                 log.warning("Could not remove orphaned staged artifact")
+
+    def _path(self, reference):
+        return self._root / f"{reference}{_SUFFIX}"
 
     def stage(
         self,
@@ -100,7 +109,7 @@ class ArtifactStore:
             raise ArtifactError("unsupported_artifact_name")
 
         reference = token_urlsafe(16)
-        path = self._root / reference
+        path = self._path(reference)
         self._root.mkdir(parents=True, exist_ok=True)
 
         size = 0
@@ -144,14 +153,14 @@ class ArtifactStore:
         artifact = self._staged.get(reference)
         if artifact is None:
             raise ArtifactError("unknown_artifact")
-        stream = (self._root / reference).open("rb")
+        stream = self._path(reference).open("rb")
         stream.filename = artifact.name
         return stream
 
     def discard(self, reference):
         """Drop a staged artifact.  Safe to repeat, so cleanup can be blind."""
         self._staged.pop(reference, None)
-        (self._root / reference).unlink(missing_ok=True)
+        self._path(reference).unlink(missing_ok=True)
 
 
 def _safe_name(filename):

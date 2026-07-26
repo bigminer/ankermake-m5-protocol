@@ -143,13 +143,20 @@ supervised evidence. Live validation must observe exactly this order:
    printer printing the staged job name. A timeout is `indeterminate`, never
    success.
 
-Two behaviors matter for the validation run:
+Four behaviors matter for the validation run:
 
 - **Any failure after step 3 begins is `indeterminate`, not `rejected`.** The
   heaters were already commanded, so the server cannot claim nothing happened.
   Cleanup discards the staged artifact and sends `M104 S0`/`M140 S0`.
 - **A Protective Stop cancels a preparing or transferring print**, resolving it
   as `superseded/protective_stop_submitted` and running the same cleanup.
+- **Heater-off also cancels it**, as `superseded/heaters_turned_off`. Heater-off
+  stays available throughout — it is Protective — but preparation depends on
+  the heat it removes, so continuing would transfer and start a cold print.
+- **An ordinary nozzle or bed target is refused while a print is preparing**,
+  as `rejected/conflicting_preparation_pending`. The preparation owns both
+  heaters for minutes; a newer target would override one and leave the
+  preparation waiting for a temperature nothing is heating towards.
 
 Because `G36` is not honored by production firmware (see above), a supervised
 run should validate the unprepared path first, with `ANKERCTL_PREPRINT_G36`
