@@ -16,10 +16,16 @@ _NOZZLE_TEMPERATURE = MqttMsgType.ZZ_MQTT_CMD_NOZZLE_TEMP.value
 _BED_TEMPERATURE = MqttMsgType.ZZ_MQTT_CMD_HOTBED_TEMP.value
 # Limits derived from the M5C (V8110) Marlin firmware Configuration.h:
 # BED_MAXTEMP 125 / HEATER_0_MAXTEMP 325, minus Marlin's standard
-# BED_OVERSHOOT (10) / HOTEND_OVERSHOOT (15) target clamps.
+# BED_OVERSHOOT (10) / HOTEND_OVERSHOOT (15) target clamps.  This is the one
+# definition; the print-start action's preparation policy reads it rather than
+# restating a physical-safety constant that could drift.
+FIRMWARE_TEMPERATURE_LIMITS = {
+    "bed": (1, 115),
+    "nozzle": (150, 310),
+}
 _TEMPERATURE_LIMITS = {
-    "M190": (1, 115),
-    "M109": (150, 310),
+    "M190": FIRMWARE_TEMPERATURE_LIMITS["bed"],
+    "M109": FIRMWARE_TEMPERATURE_LIMITS["nozzle"],
 }
 
 
@@ -48,12 +54,16 @@ def flash_redirect(path: str, message: str | None = None, category="info"):
     return redirect(path)
 
 
-def extract_preprint_temperatures(data: bytes) -> tuple[int, int]:
-    """Extract the resolved first-layer bed and nozzle temperatures."""
+def parse_preprint_temperatures(data: bytes) -> tuple[int, int]:
+    """Read the resolved first-layer bed and nozzle temperatures.
+
+    Parsing only: callers that own a temperature policy apply their own limits
+    to the result.
+    """
     text = data[:256 * 1024].decode("utf-8", errors="ignore")
     temperatures = {}
 
-    for command, limits in _TEMPERATURE_LIMITS.items():
+    for command in _TEMPERATURE_LIMITS:
         match = re.search(
             rf"(?im)^\s*{command}\b[^\r\n;]*?\b[SR]\s*(-?\d+(?:\.\d+)?)",
             text,
@@ -61,14 +71,23 @@ def extract_preprint_temperatures(data: bytes) -> tuple[int, int]:
         if not match:
             raise ValueError(f"Pre-print hook could not find {command} temperature")
 
-        value = round(float(match.group(1)))
-        if not limits[0] <= value <= limits[1]:
+        temperatures[command] = round(float(match.group(1)))
+
+    return temperatures["M190"], temperatures["M109"]
+
+
+def extract_preprint_temperatures(data: bytes) -> tuple[int, int]:
+    """Extract the resolved first-layer temperatures and check them."""
+    bed_temp, nozzle_temp = parse_preprint_temperatures(data)
+
+    for command, value in (("M190", bed_temp), ("M109", nozzle_temp)):
+        low, high = _TEMPERATURE_LIMITS[command]
+        if not low <= value <= high:
             raise ValueError(
                 f"Pre-print hook rejected unsafe {command} temperature: {value}C"
             )
-        temperatures[command] = value
 
-    return temperatures["M190"], temperatures["M109"]
+    return bed_temp, nozzle_temp
 
 
 def extract_preprint_temperatures_from_file(file) -> tuple[int, int]:
@@ -194,6 +213,13 @@ def _run_preprint_upload(app, upload, user_name, bed_temp, nozzle_temp):
             _disconnect_mqtt(client)
 
 
+def upload_identity() -> tuple[str, str]:
+    """Derive the caller identity from the trusted request, never its body."""
+    user_name = request.headers.get("User-Agent", "ankerctl").split("/")[0]
+    origin = "slicer_upload" if "slicer" in user_name.lower() else "pppp_upload"
+    return user_name, origin
+
+
 def upload_file_to_printer(app, file):
     """ This function uploads a file to the printer.
 
@@ -201,7 +227,7 @@ def upload_file_to_printer(app, file):
         - app (object): The application object.
         - file (file-like object): The file to be uploaded to the printer.
     """
-    user_name = request.headers.get("User-Agent", "ankerctl").split("/")[0]
+    user_name, _origin = upload_identity()
 
     if app.config.get("preprint_g36"):
         bed_temp, nozzle_temp = extract_preprint_temperatures_from_file(file)

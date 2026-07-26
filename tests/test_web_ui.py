@@ -1,9 +1,11 @@
 import contextlib
 import io
 import json
+import tempfile
 import time
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest import mock
 
 from cli.model import Account, Config, Printer
@@ -21,7 +23,9 @@ from web.printer_actions import (
     HeaterOff,
     NozzleTarget,
     Pause,
+    PrintStart,
 )
+from web.printer_artifacts import ArtifactStore
 from web.lib.service import RunState
 from web.printer_snapshot import PrinterSnapshots
 
@@ -113,6 +117,7 @@ class WebUiTestCase(unittest.TestCase):
         self.old_preprint_g36 = app.config.get("preprint_g36")
         self.old_svc = app.svc
         self.old_printer_snapshots = getattr(app, "printer_snapshots", None)
+        self.old_printer_artifacts = getattr(app, "printer_artifacts", None)
         self.old_printer_actions = getattr(app, "printer_actions", None)
 
         app.config["TESTING"] = True
@@ -138,6 +143,7 @@ class WebUiTestCase(unittest.TestCase):
         app.config["preprint_g36"] = self.old_preprint_g36
         app.svc = self.old_svc
         app.printer_snapshots = self.old_printer_snapshots
+        app.printer_artifacts = self.old_printer_artifacts
         app.printer_actions = self.old_printer_actions
 
     def test_root_without_token_is_available(self):
@@ -279,6 +285,136 @@ class WebUiTestCase(unittest.TestCase):
         )
 
         self.assertEqual(resp.status_code, 413)
+
+    def _ungate_print_start(self):
+        """Install a print-start seam that records what the route submitted."""
+        staging = tempfile.TemporaryDirectory()
+        self.addCleanup(staging.cleanup)
+        submitted = []
+
+        class FakeActions:
+            outcome = SimpleNamespace(
+                status="accepted", reason=None, request_id="print-1"
+            )
+
+            def is_enabled(self, kind):
+                return kind == "print_start"
+
+            def submit(self, request):
+                submitted.append(request)
+                return self.outcome
+
+        actions = FakeActions()
+        app.printer_actions = actions
+        app.printer_artifacts = ArtifactStore(staging.name)
+        return actions, submitted
+
+    def test_slicer_upload_submits_a_named_print_start_action(self):
+        actions, submitted = self._ungate_print_start()
+
+        resp = self.client.post(
+            "/api/files/local",
+            data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "cube v2.gcode")},
+            content_type="multipart/form-data",
+            headers={"User-Agent": "OrcaSlicer/2.3"},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        # Named-action status, not a bare success: the slicer learns the print
+        # was accepted, which is not the same as started.
+        self.assertEqual(resp.json["ankerctl"]["action"], "print_start")
+        self.assertEqual(resp.json["ankerctl"]["status"], "accepted")
+        self.assertEqual(resp.json["ankerctl"]["requestId"], "print-1")
+        self.assertEqual(len(submitted), 1)
+        self.assertEqual(submitted[0].printer_id, "printer-0")
+        self.assertIsInstance(submitted[0].action, PrintStart)
+
+        artifact = app.printer_artifacts.get(submitted[0].action.artifact)
+        # Identity and name are server-derived; the request body chose neither.
+        self.assertEqual(artifact.name, "cube_v2.gcode")
+        self.assertEqual(artifact.user_name, "OrcaSlicer")
+        self.assertEqual(artifact.origin, "slicer_upload")
+        self.assertIsNone(artifact.bed_celsius)
+
+    def test_slicer_upload_reports_the_rejection_reason(self):
+        actions, submitted = self._ungate_print_start()
+        actions.outcome = SimpleNamespace(
+            status="rejected", reason="idle_printer_required"
+        )
+
+        resp = self.client.post(
+            "/api/files/local",
+            data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "cube.gcode")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn(b"print-start action was rejected", resp.data)
+        self.assertIn(b"idle_printer_required", resp.data)
+
+    def test_slicer_upload_reports_a_staging_refusal(self):
+        self._ungate_print_start()
+        app.config["preprint_g36"] = True
+
+        resp = self.client.post(
+            "/api/files/local",
+            data={
+                "print": "true",
+                "file": (io.BytesIO(b"M190 S{bed}\nM109 S220\n"), "cube.gcode"),
+            },
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(b"unresolved_preparation_temperatures", resp.data)
+
+    def test_browser_upload_reports_named_action_status(self):
+        actions, submitted = self._ungate_print_start()
+
+        accepted = self.client.post(
+            "/api/ankerctl/file/upload",
+            data={"gcode_file": (io.BytesIO(b"G1 X1\n"), "cube.gcode")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(accepted.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["_flashes"][-1][0], "info")
+            self.assertIn("Print start accepted", sess["_flashes"][-1][1])
+            # Acceptance must not be rendered as a started print.
+            self.assertNotIn("sent to printer", sess["_flashes"][-1][1])
+
+        actions.outcome = SimpleNamespace(
+            status="rejected", reason="supervised_validation_required"
+        )
+        rejected = self.client.post(
+            "/api/ankerctl/file/upload",
+            data={"gcode_file": (io.BytesIO(b"G1 X1\n"), "cube.gcode")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(rejected.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["_flashes"][-1][0], "danger")
+            self.assertIn("supervised_validation_required", sess["_flashes"][-1][1])
+        self.assertEqual(len(submitted), 2)
+
+    def test_uploads_keep_the_legacy_path_while_print_start_is_gated(self):
+        app.printer_actions = SimpleNamespace(is_enabled=lambda kind: False)
+
+        with mock.patch("web.util.upload_file_to_printer") as upload_file:
+            slicer = self.client.post(
+                "/api/files/local",
+                data={"print": "true", "file": (io.BytesIO(b"G1 X1\n"), "cube.gcode")},
+                content_type="multipart/form-data",
+            )
+            browser = self.client.post(
+                "/api/ankerctl/file/upload",
+                data={"gcode_file": (io.BytesIO(b"G1 X1\n"), "cube.gcode")},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(slicer.status_code, 200)
+        self.assertEqual(browser.status_code, 302)
+        self.assertEqual(upload_file.call_count, 2)
 
     def test_status_reports_service_shape(self):
         app.svc = FakeServiceSet({

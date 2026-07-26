@@ -1,3 +1,4 @@
+import contextlib
 import uuid
 import logging as log
 
@@ -11,6 +12,19 @@ from libflagship.pppp import P2PCmdType, Aabb, FileTransfer, FileTransferReply
 from libflagship.ppppapi import FileUploadInfo, PPPPError
 
 FILE_TRANSFER_ACK_TIMEOUT = 15
+
+
+@contextlib.contextmanager
+def _transfer_errors():
+    """Map PPPP failures onto the ConnectionError callers already handle."""
+    try:
+        yield
+    except PPPPError as E:
+        log.error(f"Could not send print job: {E}")
+        raise ConnectionError(f"Printer rejected print job: {E}") from E
+    except TimeoutError as E:
+        log.error(f"File transfer stalled: {E}")
+        raise ConnectionError(f"File transfer stalled: {E}") from E
 
 
 class FileTransferService(Service):
@@ -36,6 +50,16 @@ class FileTransferService(Service):
         return result
 
     def send_file(self, fd, user_name):
+        """Transfer an upload and start it, as one inseparable legacy step."""
+        self.start_job(self.transfer_file(fd, user_name))
+
+    def transfer_file(self, fd, user_name):
+        """Send file metadata and contents, stopping before print start.
+
+        Returns an opaque handle that ``start_job`` submits.  The two phases
+        are separate so the Printer-action module owns the boundary between
+        protocol transfer and final start submission.
+        """
         try:
             api = self.pppp._api
         except AttributeError:
@@ -45,7 +69,7 @@ class FileTransferService(Service):
             fd, fd.filename, user_name=user_name, user_id="-", machine_id="-"
         )
         log.info(f"Going to upload {fui.size} bytes as {fui.name!r}")
-        try:
+        with _transfer_errors():
             log.info("Requesting file transfer..")
             api.send_xzyh(str(uuid.uuid4())[:16].encode(), cmd=P2PCmdType.P2P_SEND_FILE,
                           timeout=FILE_TRANSFER_ACK_TIMEOUT)
@@ -60,17 +84,14 @@ class FileTransferService(Service):
                 self.api_aabb_request(api, FileTransfer.DATA, chunk, pos)
                 pos += len(chunk)
 
-            log.info("File upload complete. Requesting print start of job.")
+        return api
 
-            self.api_aabb_request(api, FileTransfer.END)
-        except PPPPError as E:
-            log.error(f"Could not send print job: {E}")
-            raise ConnectionError(f"Printer rejected print job: {E}") from E
-        except TimeoutError as E:
-            log.error(f"File transfer stalled: {E}")
-            raise ConnectionError(f"File transfer stalled: {E}") from E
-        else:
-            log.info("Successfully sent print job")
+    def start_job(self, transfer):
+        """Submit the transferred job for printing."""
+        log.info("File upload complete. Requesting print start of job.")
+        with _transfer_errors():
+            self.api_aabb_request(transfer, FileTransfer.END)
+        log.info("Successfully sent print job")
 
     def handler(self, data):
         chan, msg = data
