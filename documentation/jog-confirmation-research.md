@@ -125,7 +125,15 @@ published M5C firmware source." **That is false.** `REFUTED`:
 - That is architecturally expected and already recorded here:
   `local-control-research.md:229-231` concludes "The M5C's Linux 'upper computer'
   bridges Anker MQTT to the Marlin MCU and owns job execution." The MQTT opcode
-  table is parsed by that Linux module. **It has never been published.**
+  table is parsed by that Linux module. ~~**It has never been published.**~~
+  **Corrected 2026-07-27: that claim was wrong and was reached by searching only
+  the Marlin repo.** `eufymake/eufyMake-linux-sdk` is published (GPL-3.0). Its
+  top level is BSP-shaped — `bootloader`, `buildroot`, `kernel`,
+  `module_driver` — so it may not carry the MQTT application, but that has to be
+  checked rather than assumed. Two more vendor trees in the Marlin repo were
+  also missed and are directly relevant: `src/gcode/anker_gcode/` and
+  `src/feature/anker/` (fourteen modules, including `anker_homing`,
+  `anker_z_sensorless`, `anker_z_offset`, `anker_pause`, and `handshake`).
 
 Consequently the only ways to learn the payload shape of 0x400/0x401 are:
 
