@@ -28,15 +28,12 @@ Last updated: 2026-07-26
 
 ## Current repository state
 
-- `main` and `origin/main` are synchronized at the merge of
-  [`bigminer/ankermake-m5-protocol#20`](https://github.com/bigminer/ankermake-m5-protocol/pull/20).
-  PR #20 joined the prior checkpoint-merge ancestry with the remaining
-  `local-control` commits. The fully merged local and remote `local-control`
-  branches were then deleted.
-- Working branch: `issue-14-upload-print-start`, one commit ahead of `main`.
-  It implements issue 14 (upload, preparation, print start) as a staged
-  Compound action. Not yet pushed and no pull request opened.
-- Before that, `main` was at `df6f971`. Three PRs merged on
+- `main` and `origin/main` are synchronized at `4d7268f`, the merge of
+  [#24](https://github.com/bigminer/ankermake-m5-protocol/pull/24) (issue 14 —
+  upload, preparation, and print start as a staged Compound action). Its branch
+  was deleted locally and on the remote. Issue 14 is closed. No open pull
+  requests, no other local branches.
+- Earlier, `main` was at `df6f971`. Three PRs merged on
   2026-07-26: [#21](https://github.com/bigminer/ankermake-m5-protocol/pull/21)
   (thermal/fan actions plus two Protective fixes),
   [#22](https://github.com/bigminer/ankermake-m5-protocol/pull/22) (per-action
@@ -59,8 +56,9 @@ Last updated: 2026-07-26
   ungated unvalidated motion, upload, and print start at the same time. It fails
   closed on a typo and never aborts startup; see the runbook section in
   `documentation/local-macos-service.md`.
-- Checks on `main`: 105 offline tests pass with 8 skipped; 27 browser tests
-  pass; `git diff --check` and the secret sweep pass.
+- Checks on `main`: 168 offline tests pass with 8 deselected; 28 browser tests
+  pass; `git diff --check` and the secret sweep pass. PR #24's CI (build, test,
+  secret-sweep) passed before merge.
 - Origin branch cleanup removed `local-control`, `master`,
   `exiles-1.1-rebased`, `pyinstaller`, and `treitmayr_mqtt-commands` after
   verifying they were merged or had no unique patch content. The remaining
@@ -95,8 +93,11 @@ Last updated: 2026-07-26
 The worktree contains local user state that must not be modified, staged, or
 committed without explicit instruction:
 
-- `.env` is modified and contains local configuration.
-- `.playwright-mcp/` is an untracked user/browser artifact directory.
+- `.env` is **tracked** and locally modified. The only divergence is
+  `FLASK_HOST`: the committed default is `127.0.0.1` and this machine binds
+  elsewhere. It will show as dirty in every session — that is expected, and it
+  must never be staged.
+- `.playwright-mcp/` is a browser artifact directory, now git-ignored.
 
 The Chrony PID-file repair and its documentation were committed in `261f8ce`.
 Do not stage `.env` or `.playwright-mcp/`.

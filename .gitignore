@@ -8,3 +8,6 @@ ankerctl.log
 
 # Personal setup values (copy from setup.local.conf.example). Never committed.
 /setup.local.conf
+
+# Browser-automation artifacts from local MCP/Playwright sessions.
+/.playwright-mcp/
