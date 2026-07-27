@@ -20,11 +20,17 @@ claim**. Append to it as findings land. Never delete a refuted entry; mark it
 
 | Doc | Role |
 | --- | --- |
-| `printer-findings.md` (this) | What we know + confidence. **Entry point.** |
+| `method.md` | **Read first.** Goal, source hierarchy, guardrails. Decides what counts as evidence here. |
+| `printer-findings.md` (this) | What we know + confidence. **Entry point for findings.** |
 | `local-macos-service.md` | Runbook: setup, topology, recovery procedures. |
 | `printer-test-validation.md` | Test gates, live-test procedure, validation runs. |
 | `local-control-research.md` | Long-form research narrative. |
-| `CLAUDE.md` / `AGENTS.md` | Safety + secret rules. Binding. |
+| `jog-confirmation-research.md` | What can confirm a jog (issue #12). Design input, not a ledger entry. |
+| `next-step-local-broker.md` | Local-broker cutover notes. |
+| `audit-2026-07-27.md` | Contradiction sweep and its dispositions. |
+| `../CONTEXT.md` | Domain glossary for Printer-action language. |
+| `../docs/adr/` | Architecture decisions (gating, no-replay, typed action interface). |
+| `CLAUDE.md` / `AGENTS.md` | Safety + secret rules. Binding, regardless of evidence. |
 
 ---
 
@@ -92,7 +98,8 @@ scripts/printer-probe.py gcode "M105" # arbitrary send; refuses the dangerous se
 | Aspect | Status |
 | --- | --- |
 | Dangerous-command guard (`G28`/`G28 Z`/`G28 X Z`/`N20 G28 Z`/`g28 z`/`G36`/`M402` refused; `G28 X Y`/`G28 X`/`M114`/`M119`/`M851`/`G92 Z0` allowed) | `CONFIRMED` 2026-07-15 01:20 |
-| Live read paths (`pos`/`endstops`/`status`/`watch`) | `UNVERIFIED` — printer went silent before they could be exercised. Built from scripts that worked at 00:38–01:03, but not proven in this form. **Test before trusting.** |
+| `status` and `gcode` live paths | `CONFIRMED` 2026-07-27 — `status` run three times (one produced the full 1027 enumeration), `gcode` twice. Note `gcode` filters replies starting `ok T:`, so an `M105` sent through it prints nothing; that is the filter, not a failure. |
+| `pos` / `endstops` / `watch` live paths | `UNVERIFIED` — still never exercised in this form. **Test before trusting.** |
 
 ## Transport quick reference
 
@@ -259,7 +266,7 @@ Source: `github.com/eufymake/eufyMake-Marlin-M5C`, path
 | Sensorless *probing* is off | `//#define SENSORLESS_PROBING` | `CONFIRMED` |
 | Z homing uses the probe, on a dedicated pin | `#define USE_PROBE_FOR_Z_HOMING`; `//#define Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN` | `CONFIRMED` |
 | `ANKER_PROBE_TIMEOUT 12000` / `ANTHER_Z_DROP_DISTANCE -14` / `ANTHER_Z_RISE_DISTANCE 2` exist | `Configuration_adv.h:2993+` | `CONFIRMED` |
-| …but that block sits inside `#if ENABLED(USE_Z_SENSORLESS)` and **`USE_Z_SENSORLESS` is not defined in either config file** — may be dead code | grep of both headers | `UNVERIFIED` |
+| …but that block sits inside `#if ENABLED(USE_Z_SENSORLESS)` and **`USE_Z_SENSORLESS` is not defined in either config file** — may be dead code | grep of both headers | `UNVERIFIED` — ⚠️ **settleable without the printer** (audit B3): `src/feature/anker/anker_z_sensorless.cpp` is published and was never opened |
 
 ### The XY-is-fiction hypothesis (operator's insight, 2026-07-15)
 
@@ -285,8 +292,8 @@ two known standalone Z-homing attempts remain blocked.
 | Claim | Why it died |
 | --- | --- |
 | "`z_probe: open` under load is the root cause" | `SENSORLESS_HOMING` is enabled. If Z detection is StallGuard, it only senses **during motion** — a stationary pressed nozzle produces no stall by design. The `M119`-while-holding test could not have measured what we thought. `INVALID-TEST`, not evidence of a fault. |
-| "The probe is gated by Anker's comm module" | Plausible but never evidenced; `Z_SAFE_HOMING` + untrusted XY explains the same observations without inventing a gatekeeper. `UNVERIFIED` at best. |
-| "This printer has no proprioception" | `M114` works fine and reports position + raw step counts. The *codebase* never asks; the firmware always knew. `REFUTED`. |
+| "The probe is gated by Anker's comm module" | Plausible but never evidenced; `Z_SAFE_HOMING` + untrusted XY explains the same observations without inventing a gatekeeper. `UNVERIFIED` at best. ⚠️ **Contested — see audit B2.** The memory note `m5c-homing-dead-ends` states this as the settled working model, which contradicts this retraction. Do not settle it by argument: `src/feature/anker/anker_homing.cpp`, `anker_z_sensorless.cpp`, and `anker_z_offset.cpp` are published Tier 1 and were never opened. |
+| "This printer has no proprioception" | `M114` works fine and reports position + planner counts. The *codebase* never asks; the firmware always knew. `REFUTED`. (The "raw stepper counts" wording this row originally used is itself imprecise for this build — see the 2026-07-27 correction.) |
 | "`M401` won't move anything (no servo)" | It lifted the toolhead 14.9mm off a plate it was pressed against. "No servo" ≠ "no motion". `REFUTED`. |
 | "Leveling EEPROM was corrupted by the plate strikes" | `1072 isLeveled: 1`. Data intact. `REFUTED`. |
 
@@ -296,7 +303,7 @@ two known standalone Z-homing attempts remain blocked.
 
 | Finding | Evidence | Status |
 | --- | --- | --- |
-| `M114` works: reports X/Y/Z + raw stepper counts | `X:-15.00 Y:232.50 Z:11.55 Count X:-1920 Y:29760 Z:4620` | `CONFIRMED` |
+| `M114` works: reports X/Y/Z + planner counts (**not** live stepper reality — see the 2026-07-27 correction) | `X:-15.00 Y:232.50 Z:11.55 Count X:-1920 Y:29760 Z:4620` | `CONFIRMED` |
 | Z is **400 steps/mm** | Every observed 1mm Z jog = 400 counts; every 10mm Z jog = 4000, across a 51mm Z span | `CONFIRMED` |
 | **X/Y counts survive a power cycle exactly; Z resets to 0** | Before/after reboot: X `-1920`→`-1920`, Y `29760`→`29760`, Z `4620`→`0` | `CONFIRMED` |
 | Therefore **recording a Z number across a reboot is worthless** | Counter zeroes regardless of physical position | `CONFIRMED` |
