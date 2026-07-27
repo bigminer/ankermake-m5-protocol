@@ -39,10 +39,10 @@ looked inert and moved the toolhead 14.9mm.
 
 | Command | Does | Evidence (verbatim reply) | Verified |
 | --- | --- | --- | --- |
-| `M114` | Reports position **and raw stepper counts** | `X:-15.00 Y:232.50 Z:11.55 E:0.00 Count X:-1920 Y:29760 Z:4620` | 2026-07-15 00:38 |
+| `M114` | Reports position and planner counts — **not** live stepper reality; see the 2026-07-27 correction below | `X:-15.00 Y:232.50 Z:11.55 E:0.00 Count X:-1920 Y:29760 Z:4620` | 2026-07-15 00:38 |
 | `M119` | Endstop pin states | `x_min: open` `y_max: open` `z_min: open` `z2_min: open` `z_probe: open` | 2026-07-15 01:03 |
 | `M851` | Probe offset | `Probe Offset X0 Y0 Z0.02` | 2026-07-15 01:03 |
-| `APP_QUERY_STATUS` — commandType **1027** (`0x403`), no payload | Bursts ~16 telemetry types the UI never asks for | `1039 {"breakPoint":1}`, `1072 {"isLeveled":1}`, `1052 {...}`, `1067 {button map}`, `1098 {"filamentType":["PLA"]}` | 2026-07-14 21:55 |
+| `APP_QUERY_STATUS` — commandType **1027** (`0x403`), no payload | Bursts ~16 telemetry types the UI never asks for. **No position field** — fully enumerated in the 2026-07-27 entry below | `1039 {"breakPoint":1}`, `1072 {"isLeveled":1}`, `1052 {...}`, `1067 {button map}`, `1098 {"filamentType":["PLA"]}` | 2026-07-14 21:55; enumerated 2026-07-27 |
 
 ⚠️ **`M119` cannot see StallGuard.** `SENSORLESS_HOMING` is enabled; if Z detection
 is stall-based it only registers **during motion**. `z_probe: open` on a stationary
@@ -566,6 +566,67 @@ read-only state was printer state 0, nozzle 31.00C target 0, bed 30.24C target 0
 **Lesson worth more than any single reading: when this printer has a hard problem,
 the answer has repeatedly been its own physical interface or the runbook — not a
 command we inferred.** The button beat every opcode we considered.
+
+### `APP_QUERY_STATUS` enumerated (2026-07-27)
+
+Read-only. `scripts/printer-probe.py status` against an idle printer — a bare
+1027 query, no G-code, no motion, no heat, no operator present. Run to settle
+whether the burst carries position before designing the issue 12 jog contract.
+
+Thirteen non-temperature types came back. The probe filters 1003/1004 as
+temperature noise and skips 1043, and 1039 appears only under a suspended print,
+which reconciles the earlier "~16" estimate:
+
+| Type | Payload |
+| --- | --- |
+| 1000 | `{"subType": 1, "value": 0}` |
+| 1005 | `{"value": 0}` |
+| 1006 | `{"value": 0}` |
+| 1021 | `{"value": -5}` |
+| 1023 | `{"value": 0, "progress": 0, "stepLen": 0}` |
+| 1037 | `{"value": 0}` |
+| 1052 | `{"total_layer": 0, "real_print_layer": 25}` |
+| 1055 | `{"max_print_speed": 250}` |
+| 1067 | button map — idle/busy × signal_click/double_click/long_press |
+| 1072 | `{"isLeveled": 1}` |
+| 1093 | `{"nozzle_type": 0}` |
+| 1097 | `{"value": 0}` |
+| 1098 | `{"filamentType": ["PLA"]}` |
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| **`APP_QUERY_STATUS` carries no position field.** No X/Y/Z, no coordinate, in any of the thirteen types | full enumeration above | `CONFIRMED` |
+| Therefore a jog contract cannot confirm against the status burst; `M114` over MQTT 1043 is the only position path | follows from the above plus the confirmed `M114` round trip | `CONFIRMED` |
+| **Whether 1005 is fan speed remains open, and this run did not settle it** | see below | `UNVERIFIED` |
+| `stepLen` in 1023 may relate to `MOVE_STEP` (`0x400`) jog step length | name only; 1023 was 0 throughout on an idle printer | `UNVERIFIED` |
+| 1052 reported `real_print_layer: 25` with `total_layer: 0` on an idle printer with no job | enumeration above | staleness artifact, `UNVERIFIED` |
+
+⚠️ **Could this test have measured what I think it measured? For 1005, no.**
+An unattended-memory note has recorded 1005 as fan speed, which sits against this
+file's own `CONFIRMED` claim that "the status and `M105` replies expose no
+fan-state field." This run read `1005: 0` with the fan off — consistent with 1005
+being fan speed, and equally consistent with it being any other zero-valued
+field. **The reading does not discriminate**, and the earlier "no fan-state
+field" conclusion now looks like an inference over unlabeled types rather than a
+positive result. Downgrade confidence in it accordingly.
+
+Consequence if 1005 *is* fan speed: `fan_setting` would stop being
+unconfirmable-by-design, and the "permanent property of the protocol" framing
+behind the 2026-07-27 fan-copy decision would need retracting. Cheap way to
+settle it, requiring the operator present since it commands the fan: poll 1027,
+command the fan to 50%, poll 1027 again, compare 1005. Until then, treat fan
+confirmability as open rather than closed.
+
+**Correction to the `M114` row above.** That row calls `Count X:` "raw stepper
+counts". On this build it is not: `M114_DETAIL`, `M114_REALTIME`, and
+`M114_LEGACY` are all commented out in `Configuration_adv.h`, so `M114` falls
+through to `report_current_position_projected()` — `X:/Y:/Z:` is
+`current_position` (last *parsed* G-code) and `Count X:` is `planner.position`,
+neither of which is live stepper reality, and it does not sync the planner.
+`M114` can therefore prove acceptance, refusal, and — with `M400` — queue
+completion, but **never physical motion**. The derived figures (400 steps/mm and
+similar) are unaffected. Full citations in
+[`jog-confirmation-research.md`](jog-confirmation-research.md).
 
 ---
 
