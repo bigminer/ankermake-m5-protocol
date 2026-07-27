@@ -300,8 +300,19 @@ Two things a reviewer should know:
   browser, which watches the action stream, sees the outcome. Worth deciding
   before #19 contracts the legacy path away.
 
-`G36` is still not honored by production firmware, so a supervised run should
-validate the unprepared path first with `ANKERCTL_PREPRINT_G36` `false`.
+🚨 **`G36` is still not honored by production firmware, and the mitigation
+previously recorded here does not work.** This paragraph used to say a supervised
+run should validate the unprepared path first with `ANKERCTL_PREPRINT_G36`
+`false`. **That variable does not reach the named action.** `web/util.py:232`
+gates the *legacy* pre-print routine on it; `printer_actions.py:512` calls
+`prepare_bed` — which sends `G36` then `M400` — whenever the artifact carries a
+bed temperature, with no such check. Setting the variable false changes nothing
+about what `print_start` sends.
+
+`G36` is listed under **Known-dangerous — do not send** in the findings ledger
+("wedges the command queue, needs a power cycle") and `scripts/printer-probe.py`
+refuses it outright. **Do not run issue #18 until this is resolved.** See finding
+D1 in [`documentation/audit-2026-07-27.md`](documentation/audit-2026-07-27.md).
 
 ### Next implementation work
 
