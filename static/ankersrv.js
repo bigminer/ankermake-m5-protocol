@@ -529,18 +529,25 @@ $(function () {
             status.attr("class", "small text-success mb-0 mt-3")
                 .text(`${label} confirmed by printer telemetry.`);
         } else if (action.status === "indeterminate") {
-            // This printer publishes no fan-state fact, so a fan request can
-            // never be confirmed.  That is the expected outcome of a working
-            // request, not a failure, and alarm styling every time would teach
-            // the operator to ignore this line.  Gated on the action as well as
+            // ankerctl has no fan reading, so a fan request can never be
+            // confirmed.  That is the expected outcome of a working request,
+            // not a failure, and alarm styling every time would teach the
+            // operator to ignore this line.  Gated on the action as well as
             // the reason on purpose — an allowlist for the one action whose
             // unconfirmability supervised validation established, so a future
             // unconfirmable action still reads as an alarm until it has its own
-            // evidence.  The copy stops short of blaming the telemetry gap: a
-            // silently disconnected printer resolves through here too.
+            // evidence.
+            //
+            // The copy blames no layer in particular, deliberately.  Whether
+            // the *printer* reports fan state is unresolved: 1005 is named
+            // FAN_SPEED in the protocol table but did not move during an
+            // attended test while the fan audibly ran, which is equally
+            // consistent with it being a command echo and with the upper
+            // computer not seeing our raw M106.  See printer-findings.md,
+            // 2026-07-27.  A silently disconnected printer also lands here.
             if (action.action === "fan_setting" && action.reason === "confirmation_unavailable") {
                 status.attr("class", "small text-info mb-0 mt-3")
-                    .text(`${label} sent. This printer reports no fan state to confirm it.`);
+                    .text(`${label} sent. ankerctl has no fan reading to confirm it against.`);
             } else {
                 status.attr("class", "small text-danger mb-0 mt-3")
                     .text(action.action === "stop"

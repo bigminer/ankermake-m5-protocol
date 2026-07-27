@@ -597,7 +597,7 @@ which reconciles the earlier "~16" estimate:
 | --- | --- | --- |
 | **`APP_QUERY_STATUS` carries no position field.** No X/Y/Z, no coordinate, in any of the thirteen types | full enumeration above | `CONFIRMED` |
 | Therefore a jog contract cannot confirm against the status burst; `M114` over MQTT 1043 is the only position path | follows from the above plus the confirmed `M114` round trip | `CONFIRMED` |
-| **Whether 1005 is fan speed remains open, and this run did not settle it** | see below | `UNVERIFIED` |
+| **Whether 1005 is fan speed remains open, and this run did not settle it** | see below; narrowed further by the attended test that follows | `UNVERIFIED` |
 | `stepLen` in 1023 may relate to `MOVE_STEP` (`0x400`) jog step length | name only; 1023 was 0 throughout on an idle printer | `UNVERIFIED` |
 | 1052 reported `real_print_layer: 25` with `total_layer: 0` on an idle printer with no job | enumeration above | staleness artifact, `UNVERIFIED` |
 
@@ -616,6 +616,57 @@ behind the 2026-07-27 fan-copy decision would need retracting. Cheap way to
 settle it, requiring the operator present since it commands the fan: poll 1027,
 command the fan to 50%, poll 1027 again, compare 1005. Until then, treat fan
 confirmability as open rather than closed.
+
+### Supervised fan-readback test — is 1005 fan state? (2026-07-27)
+
+Attended. The operator confirmed presence at the printer before any command.
+Fan only — no heat, no motion, no job. Conditions were unusually clean: nozzle
+26.00C target 0, bed 26.04C target 0, printer state 0, no active job. **Cold, so
+the firmware's own hotend fan was not running** — the confound that made the
+2026-07-26 fan observations unattributable did not apply here.
+
+Commands were sent as raw G-code over `1043`, the same path the `fan_setting`
+action uses, deliberately: the question was what the *existing* action can
+confirm against.
+
+| Step | Firmware reply | Physical observation | `1005` |
+| --- | --- | --- | --- |
+| baseline | — | fan silent | `{"value": 0}` |
+| `M106 S128` (50%) | `ok` | **operator heard the fan running** | `{"value": 0}` |
+| `M107` (off) | `ok` | operator confirmed the fan stopped | `{"value": 0}` |
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| **`1005` does not track the fan when it is driven by raw G-code.** The fan physically ran and the value never moved | table above | `CONFIRMED` |
+| Therefore the `fan_setting` action as currently implemented has nothing to confirm against | it sends `M106`/`M107` over 1043 | `CONFIRMED` |
+| Whether the printer reports fan state *at all* | **still open — this test cannot decide it**, see below | `UNVERIFIED` |
+
+⚠️ **This test does not establish that the printer publishes no fan state.** Two
+hypotheses survive it and it does not discriminate between them:
+
+- **(a)** `1005` is a command echo, not a status field. The printer never reports
+  fan state, and "unconfirmable by design" is correct.
+- **(b)** `1005` reflects only what the Linux upper computer mediates via its own
+  `ZZ_MQTT_CMD_FAN_SPEED` opcode. Raw `M106` passes straight through to Marlin,
+  so the upper computer's bookkeeping never updates — it does not know the fan
+  changed.
+
+Two facts keep (b) live and were the reason for running this at all:
+`ZZ_MQTT_CMD_FAN_SPEED` is `0x3ed` = **1005 decimal** (`specification/mqtt.stf:77`)
+— the type is named fan speed in the protocol's own table, not guessed at — and
+its sibling `ZZ_MQTT_CMD_PRINT_SPEED` `0x3ee` = 1006 *is* read as an inbound
+status value by `web/service/state.py`, which maps it to the live `speed` fact.
+`normalize()` has no 1005 branch, so the value is discarded regardless.
+
+**The decisive experiment is one command:** send `0x3ed` natively and re-poll.
+If `1005` moves, it is (b) and the fix is to switch the action to the native
+opcode; if it stays 0 with the fan audibly running, it is (a). Not run — the
+payload shape is a guess (siblings all take a scalar `value`), and guessing
+payloads at this printer has a history. Needs a separate decision.
+
+Until it is run, **"this printer publishes no fan-state" is not a supported
+claim.** The supported claim is narrower: *ankerctl cannot confirm a fan request
+it issues as raw G-code.*
 
 **Correction to the `M114` row above.** That row calls `Count X:` "raw stepper
 counts". On this build it is not: `M114_DETAIL`, `M114_REALTIME`, and
