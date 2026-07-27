@@ -59,10 +59,27 @@ Last updated: 2026-07-26
 - Checks on `main`: 168 offline tests pass with 8 deselected; 28 browser tests
   pass; `git diff --check` and the secret sweep pass. PR #24's CI (build, test,
   secret-sweep) passed before merge.
-- Origin branch cleanup removed `local-control`, `master`,
-  `exiles-1.1-rebased`, `pyinstaller`, and `treitmayr_mqtt-commands` after
-  verifying they were merged or had no unique patch content. The remaining
-  legacy branches were retained because they still contain unique commits.
+- **`origin` now holds only `main`.** An earlier pass removed `local-control`,
+  `master`, `exiles-1.1-rebased`, `pyinstaller`, and `treitmayr_mqtt-commands`
+  as merged or patch-empty. The remaining four — `abale_print-stability-fix`,
+  `exiles`, `exiles-1.1-defunct`, `parameterize_docker` — were deleted on
+  2026-07-27.
+
+  They had been kept on the grounds that they still contained unique commits.
+  That was true but incomplete: unique to `main`, not unique to this fork. All
+  four were byte-identical to their `upstream` counterparts, so deleting them
+  from `origin` lost nothing. Restore any of them with:
+
+  ```sh
+  git push origin upstream/<branch>:refs/heads/<branch>
+  ```
+
+  Pre-deletion SHAs, if a restore needs verifying: `abale_print-stability-fix`
+  `d71c2ab`, `exiles` `91eafbe`, `exiles-1.1-defunct` `e430b9a`,
+  `parameterize_docker` `98335cc`.
+
+  The `upstream` remote (`anselor/ankermake-m5-protocol`) is the archive for all
+  of it. Do not delete branches there — it is not our repository.
 - The post-PR-#20 `main` workflow built and published
   `ghcr.io/bigminer/ankermake-m5-protocol:latest`, but its final legacy Release
   step failed because it accepts semantic-version tag refs and was incorrectly
