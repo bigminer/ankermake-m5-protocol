@@ -660,9 +660,37 @@ status value by `web/service/state.py`, which maps it to the live `speed` fact.
 
 **The decisive experiment is one command:** send `0x3ed` natively and re-poll.
 If `1005` moves, it is (b) and the fix is to switch the action to the native
-opcode; if it stays 0 with the fan audibly running, it is (a). Not run — the
-payload shape is a guess (siblings all take a scalar `value`), and guessing
-payloads at this printer has a history. Needs a separate decision.
+opcode; if it stays 0 with the fan audibly running, it is (a).
+
+**Not run, and it should not be run blind.** The opcode number is solid — it is
+declared unhedged as "Set fan speed" at `specification/mqtt.stf:77`, in a spec
+that marks nineteen other entries with `?` or `(probably)`. **Its payload is
+not**, and there is no convention to infer one from. The outbound shapes this
+project actually sends are four, across three opcodes:
+
+| Shape | Used by |
+| --- | --- |
+| `{commandType, value}` | Stop |
+| `{commandType, value, userName, filePath}` | Pause / Resume |
+| `{commandType, cmdData, cmdLen}` | all G-code (1043) |
+| `{commandType}` alone | status query (1027) |
+
+`PRINT_CONTROL` (1008) alone takes two of them depending on the operation, and
+conflating those two variants is the documented 2026-07-13 regression. Nor were
+any of these payloads inferred from a pattern — 1008's was established and
+live-validated on 2026-07-10. An established payload for one command licenses
+nothing about another.
+
+For `FAN_SPEED` specifically, `value` alone may be incomplete: this machine
+plausibly has part-cooling, hotend, and controller fans, so the command may want
+a fan index or mode. A partial payload on a never-exercised opcode is undefined
+behavior, not a mis-set fan speed.
+
+**The way to get the payload is to capture the official eufyMake app driving the
+fan through the local broker** — we observe, the app commands. That is the same
+experiment jog needs for `MOVE_STEP`/`MOVE_DIRECTION`
+([`jog-confirmation-research.md`](jog-confirmation-research.md), open question 2),
+so one attended app-capture session settles both.
 
 Until it is run, **"this printer publishes no fan-state" is not a supported
 claim.** The supported claim is narrower: *ankerctl cannot confirm a fan request
