@@ -700,9 +700,39 @@ def test_validation_mode_renders_server_owned_thermal_and_fan_outcomes(
         }});
         """
     )
+    # This printer publishes no fan-state fact, so a fan request can never be
+    # confirmed.  Reporting that as a failure every time would train the
+    # operator to ignore the outcome line, so it reads as information.
+    fan = page.locator("#fan-action-status").inner_text().lower()
+    assert "sent" in fan
+    assert "no fan state" in fan
+    assert "could not be confirmed" not in fan
+    assert "confirmation_unavailable" not in fan
+    assert "text-info" in page.locator("#fan-action-status").get_attribute("class")
+    assert "text-danger" not in page.locator("#fan-action-status").get_attribute("class")
+
+    # A fan request that failed for a real reason must still read as a failure.
+    page.evaluate(
+        f"""
+        {state_socket}.emit({{
+            cursor: 16,
+            actions: {{
+                "fan-2": {{
+                    requestId: "fan-2",
+                    action: "fan_setting",
+                    status: "indeterminate",
+                    reason: "protocol_submission_uncertain",
+                    updatedAt: 16,
+                }},
+            }},
+            facts: {{}},
+        }});
+        """
+    )
     fan = page.locator("#fan-action-status").inner_text().lower()
     assert "could not be confirmed" in fan
-    assert "confirmation_unavailable" in fan
+    assert "protocol_submission_uncertain" in fan
+    assert "text-danger" in page.locator("#fan-action-status").get_attribute("class")
 
 
 def test_validation_mode_protective_stop_remains_available_with_stale_state(

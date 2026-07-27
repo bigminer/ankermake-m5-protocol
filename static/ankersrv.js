@@ -529,10 +529,24 @@ $(function () {
             status.attr("class", "small text-success mb-0 mt-3")
                 .text(`${label} confirmed by printer telemetry.`);
         } else if (action.status === "indeterminate") {
-            status.attr("class", "small text-danger mb-0 mt-3")
-                .text(action.action === "stop"
-                    ? `${label} could not be confirmed. Use the printer's physical controls; remove power if motion remains hazardous.`
-                    : `${label} could not be confirmed: ${action.reason}.`);
+            // This printer publishes no fan-state fact, so a fan request can
+            // never be confirmed.  That is the expected outcome of a working
+            // request, not a failure, and alarm styling every time would teach
+            // the operator to ignore this line.  Gated on the action as well as
+            // the reason on purpose — an allowlist for the one action whose
+            // unconfirmability supervised validation established, so a future
+            // unconfirmable action still reads as an alarm until it has its own
+            // evidence.  The copy stops short of blaming the telemetry gap: a
+            // silently disconnected printer resolves through here too.
+            if (action.action === "fan_setting" && action.reason === "confirmation_unavailable") {
+                status.attr("class", "small text-info mb-0 mt-3")
+                    .text(`${label} sent. This printer reports no fan state to confirm it.`);
+            } else {
+                status.attr("class", "small text-danger mb-0 mt-3")
+                    .text(action.action === "stop"
+                        ? `${label} could not be confirmed. Use the printer's physical controls; remove power if motion remains hazardous.`
+                        : `${label} could not be confirmed: ${action.reason}.`);
+            }
         } else if (action.status === "superseded") {
             const supersededBy = {
                 protective_stop_submitted: "the protective Stop request",

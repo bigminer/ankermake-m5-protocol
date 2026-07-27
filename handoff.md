@@ -201,12 +201,41 @@ Criterion 3 is met for nozzle and bed. Two items remain:
    `ANKERCTL_VALIDATED_ACTION_CONTRACTS="nozzle_target=m5c-nozzle-target-v1,bed_target=m5c-bed-target-v1,heater_off=m5c-heater-off-v1"`
    That enables exactly the three actions with successful evidence and leaves
    everything else gated. Issue 15 can close once this is set.
-2. **`fan_setting` is deliberately excluded, pending a decision.** See below.
+2. **`fan_setting` — the copy is fixed; enabling it is now an operator step.**
+   See below.
 
-#### The `fan_setting` decision
+#### The `fan_setting` decision — settled 2026-07-27
 
-Deliberately left open on 2026-07-26 rather than decided quietly, because the
-reasoning is easy to lose and the obvious-looking answer is probably wrong.
+**Decided: soften the copy first, then enable.** The copy half is done. The
+enable half is an operator step — add `fan_setting=m5c-fan-setting-v1` to
+`ANKERCTL_VALIDATED_ACTION_CONTRACTS` alongside the three thermal contracts.
+No code is owed for it; the contract already exists in `printer_actions.py`.
+
+`renderActionOutcome` in `static/ankersrv.js` now gives
+`fan_setting`/`confirmation_unavailable` its own informational `text-info` line
+instead of `text-danger` "could not be confirmed". The other two ways a fan
+request can reach `indeterminate` — `protocol_submission_uncertain` and
+`server_restarted_before_confirmation` — keep the failure styling, because those
+are real failures; a browser test covers both directions.
+
+Two things about that change worth carrying forward:
+
+- **The branch is gated on the action as well as the reason, deliberately.**
+  Today `confirmation_unavailable` is emitted only for `fan_setting`, so the
+  action check is redundant on paper. It is an allowlist, not defensive coding:
+  a future unconfirmable action has no supervised evidence behind it and should
+  read as an alarm until it does.
+- **`confirmation_unavailable` conflates two different unknowns.** A fan request
+  resolves that way when the deadline passes, regardless of whether the command
+  ever reached the printer — `confirmed` is hardcoded `False` for `fan_setting`.
+  A silently disconnected printer, the documented 2026-07-19 failure mode,
+  resolves identically to a working one. The copy therefore stops short of
+  naming the telemetry gap as the cause. Separating the two unknowns properly
+  would need the `unconfirmable` status rejected below, so it stays open — worth
+  revisiting when #19 contracts the legacy path.
+
+The reasoning behind the decision is kept below, because the obvious-looking
+answer is probably wrong and that is easy to lose.
 
 **The mechanic.** The M5C publishes no fan-state fact, so a fan action has
 nothing to confirm against. It is accepted, `M106`/`M107` is sent, and 30
@@ -230,12 +259,13 @@ after removing it.
 
 **The options, roughly in order of preference.**
 
-- **Soften the copy first, then enable.** Give `fan_setting` its own
-  `indeterminate` string — something like "Fan setting sent; this printer
-  reports no fan telemetry to confirm it" — styled as information rather than
-  danger. This is the one change that makes the outcome honest *and* accurate:
-  the request genuinely did what it could, and nothing is wrong. Was raised as
-  finding 5 in the #21 review and not actioned.
+- **Soften the copy first, then enable.** ← **chosen, and the copy half is
+  done.** Give `fan_setting` its own `indeterminate` string, styled as
+  information rather than danger. This is the one change that makes the outcome
+  honest *and* accurate: the request genuinely did what it could, and nothing is
+  wrong. Originally raised as finding 5 in the #21 review — which lived in a
+  session's review output and was never posted to GitHub, so it is not
+  recoverable there.
 - **Add a distinct outcome status** (`unconfirmable`, say) separate from
   `indeterminate`, so the server distinguishes "we could not confirm this" from
   "this class of action is never confirmable". Cleaner semantically, but it
