@@ -2,17 +2,27 @@
 
 ## Before diagnosing the printer
 
-- **Read [`documentation/INDEX.md`](documentation/INDEX.md) first.** It is the
-  front door: settled facts, refuted claims, open questions, and where the
-  evidence lives. It exists because sessions repeatedly re-derived known results
-  and resurrected dead ones.
+- **Read [`documentation/INDEX.md`](documentation/INDEX.md) before acting.** Its
+  §1 is a trigger table: match what you are about to do, and the answer is
+  probably already there. **Always read it before** grepping firmware, designing
+  or changing a printer action, explaining why something cannot be confirmed,
+  investigating homing or motion, or planning a live test.
 
-  Behind it: [`documentation/method.md`](documentation/method.md) for what counts
-  as evidence — **this repo's own specs and generated tables are not evidence
-  about the printer** — and
-  [`documentation/printer-findings.md`](documentation/printer-findings.md) for the
-  detailed ledger. Append what you learn, with a status. Don't delete refuted
-  entries.
+  It exists because sessions repeatedly re-derived known results and revived
+  refuted ones. §3 lists the specific method errors made here — including
+  grepping two of the three firmware config files, and citing this repo's own
+  `specification/mqtt.stf` as evidence about the printer.
+
+  **This repo's specs, generated opcode tables, and code are not evidence about
+  the printer.** They are our reverse-engineering. Only published first-party
+  source, captured official-app traffic, and supervised observation are. Full
+  hierarchy in [`documentation/method.md`](documentation/method.md).
+
+  Detail behind the index lives in
+  [`documentation/printer-findings.md`](documentation/printer-findings.md);
+  primary evidence in [`documentation/captures/`](documentation/captures/).
+  Append what you learn, with a status and a citation. Never delete a refuted
+  entry — move it to the index's §6 with what killed it.
 
 - **If the printer seems dead, locate the silent layer before restarting
   anything.** Check `/opt/ankerm5c/logs/mosquitto.out.log` first; `ankerctl`'s

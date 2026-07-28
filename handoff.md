@@ -237,10 +237,20 @@ Two things about that change worth carrying forward:
 The reasoning behind the decision is kept below, because the obvious-looking
 answer is probably wrong and that is easy to lose.
 
-**The mechanic.** The M5C publishes no fan-state fact, so a fan action has
-nothing to confirm against. It is accepted, `M106`/`M107` is sent, and 30
-seconds later it resolves `indeterminate/confirmation_unavailable`. That is not
-a bug and no fixture can fix it — it is a permanent property of the protocol.
+> ⚠️ **The premise under this whole section is `REFUTED` (2026-07-28).** The
+> printer *does* report fan state — `1005`, percent, published on change,
+> observed at 99 mid-print and 0 at completion. The reasoning below is kept
+> because the alarm-fatigue argument still holds and the copy fix still stands,
+> but **"unconfirmable by design" was wrong**. The action is unconfirmable *as
+> implemented*: we send raw `M106`, which the module never learns about, and
+> `normalize()` has no `1005` branch. The real fix is the native `FAN_SPEED`
+> opcode plus wiring 1005 — see [`INDEX.md`](documentation/INDEX.md) F-003/F-022.
+
+**The mechanic (as understood at the time, now corrected above).** The M5C was
+believed to publish no fan-state fact, so a fan action had nothing to confirm
+against. It is accepted, `M106`/`M107` is sent, and 30 seconds later it resolves
+`indeterminate/confirmation_unavailable`. That was read as a permanent property
+of the protocol. It is not — it is a property of how we drive the fan.
 
 **The tension.** The action works. On 2026-07-26 the operator heard the fan
 start at 50% and stop at 0%, from a verified-silent baseline, and both requests
@@ -300,14 +310,19 @@ Two things a reviewer should know:
   browser, which watches the action stream, sees the outcome. Worth deciding
   before #19 contracts the legacy path away.
 
-🚨 **`G36` is still not honored by production firmware, and the mitigation
-previously recorded here does not work.** This paragraph used to say a supervised
-run should validate the unprepared path first with `ANKERCTL_PREPRINT_G36`
-`false`. **That variable does not reach the named action.** `web/util.py:232`
-gates the *legacy* pre-print routine on it; `printer_actions.py:512` calls
-`prepare_bed` — which sends `G36` then `M400` — whenever the artifact carries a
-bed temperature, with no such check. Setting the variable false changes nothing
-about what `print_start` sends.
+🚨 **`print_start` sends `G36` ungated, and the mitigation previously recorded
+here does not work.** This paragraph used to say a supervised run should validate
+the unprepared path first with `ANKERCTL_PREPRINT_G36` `false`. **That variable
+does not reach the named action.** `web/util.py:232` gates the *legacy* pre-print
+routine on it; `printer_actions.py:512` calls `prepare_bed` — which sends `G36`
+then `M400` — whenever the artifact carries a bed temperature, with no such
+check. Setting the variable false changes nothing about what `print_start` sends.
+
+⚠️ **Corrected 2026-07-28:** this used to open "`G36` is still not honored by
+production firmware", which is `REFUTED`. The 2026-07-09 tests ran the nozzle at
+150C and `EXTRUDE_MINTEMP` is 160, so `G36` was never given a hot enough nozzle.
+It may well work when properly invoked. The defect here is the missing gate, not
+the command.
 
 `G36` has never produced leveling motion or a completion `ok` across three
 supervised sessions, so `prepare_bed` waits for something that never arrives and

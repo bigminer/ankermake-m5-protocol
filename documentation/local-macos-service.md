@@ -739,6 +739,10 @@ The official eufyMake M5C Marlin source contains `G36` and internal wiping,
 alignment and homing routines. That does not mean production firmware accepts
 `G36` in every transport.
 
+⚠️ **Corrected 2026-07-28 — the conclusion drawn from this was wrong.** See
+[`INDEX.md`](INDEX.md) §6 and `printer-findings.md`. The observations stand; the
+inference "production firmware does not accept `G36`" does not.
+
 Observed behavior on firmware V3.1.56:
 
 1. Embedding `G36` in uploaded G-code caused the job not to start.
@@ -748,6 +752,22 @@ Observed behavior on firmware V3.1.56:
 4. Heater-off commands returned misleading acknowledgements while targets
    remained active.
 5. A physical printer power cycle was required.
+
+**Why 2 happened: the nozzle was at 150C and the firmware requires 160.**
+`G28.cpp:263` gates real Z probing on `degHotend(0) >= EXTRUDE_MINTEMP`, and
+`EXTRUDE_MINTEMP` is 160 (`Configuration.h:719`). `G36` armed the flag, called
+`G28`, failed that test, and returned without probing or completing — exactly
+what was recorded. It was never given a hot enough nozzle.
+
+**Items 3-5 are contested, not established.** Two supervised sessions on
+2026-07-09 did *not* reproduce them: the printer reported `Idle / Ready to Print`
+and the emergency cooldown worked. A firmware `kill()` on failed alignment
+(`anker_align.cpp:131`) would produce exactly items 3-5, so both records are
+probably accurate about *different* failure modes.
+
+**Keep `ANKERCTL_PREPRINT_G36` `false` anyway** — but for the right reason: the
+hook as written preheats to 150, below the threshold, so it cannot work. Note
+also that the flag does **not** gate the named `print_start` action (issue #25).
 
 The local code contains an opt-in pre-print implementation in `web/util.py`
 for research history, but the LaunchAgent sets:

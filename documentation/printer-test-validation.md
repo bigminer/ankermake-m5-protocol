@@ -158,9 +158,20 @@ Four behaviors matter for the validation run:
   heaters for minutes; a newer target would override one and leave the
   preparation waiting for a temperature nothing is heating towards.
 
-Because `G36` is not honored by production firmware (see above), a supervised
-run should validate the unprepared path first, with `ANKERCTL_PREPRINT_G36`
-`false`.
+⚠️ **Both claims in this paragraph are wrong (corrected 2026-07-28).** It
+previously read: *"Because `G36` is not honored by production firmware (see
+above), a supervised run should validate the unprepared path first, with
+`ANKERCTL_PREPRINT_G36` false."*
+
+1. **`G36` was never given a hot enough nozzle.** The 2026-07-09 sessions ran at
+   150C; `EXTRUDE_MINTEMP` is **160**, and `G28.cpp:263` gates real probing on it.
+   "Not honored by production firmware" is `REFUTED`.
+2. **`ANKERCTL_PREPRINT_G36` does not reach the named action.** It gates the
+   *legacy* path only (`web/util.py:232`); `printer_actions.py:512` calls
+   `prepare_bed` — which sends `G36` — with no such check. Setting it `false`
+   changes nothing about `print_start`.
+
+Tracked as issue #25, which blocks #18. See [`INDEX.md`](INDEX.md) §1.
 
 ## Web homing disabled (incidents 2026-07-13)
 
@@ -275,8 +286,14 @@ sending, never replays unresolved actions after restart, and reports
 `accepted`, `confirmed`, `rejected`, `superseded`, or `indeterminate`. Named
 nozzle, bed, heater-off, and fan actions are also available only in validation
 mode: heater targets confirm from new target telemetry, heater-off is
-Protective, and fan requests become indeterminate because the printer exposes
-no fan-state fact.
+Protective, and fan requests become indeterminate. ⚠️ **The stated reason —
+"because the printer exposes no fan-state fact" — is `REFUTED` (2026-07-28).**
+The printer *does* report fan state, as `1005`, published on change; it was
+observed at 99 mid-print and 0 at completion. Fan requests are indeterminate
+because **ankerctl sends raw `M106`**, which the communication module never
+learns about (`REPORT_FAN_CHANGE` is compiled out), and because `normalize()`
+has no `1005` branch. A defect in our implementation, not a protocol limit.
+See [`INDEX.md`](INDEX.md) F-003, F-022.
 
 Two rules keep the safe direction reachable when telemetry degrades. Every
 Protective command — heater-off for any heater, and a fan request of 0% —
@@ -302,8 +319,9 @@ An attended thermal/fan run on 2026-07-23 produced successful telemetry evidence
 for nozzle and bed targets, same-resource supersession, independent-resource
 coordination, and Protective all-heaters-off from a stale snapshot. The
 operator also confirmed the part fan ran at the 50% request and stopped at 0%.
-Both fan outcomes correctly became `indeterminate/confirmation_unavailable`
-because the protocol has no fan-state fact. The M5C also has no numeric
+Both fan outcomes became `indeterminate/confirmation_unavailable` — ⚠️ **not
+"because the protocol has no fan-state fact", which is `REFUTED`; see the
+correction above and `INDEX.md` F-003.** The M5C also has no numeric
 temperature display, so the operator could not independently compare heater
 targets with telemetry. See the dated request-by-request ledger in
 [printer-findings.md](printer-findings.md). Issue #15 remains incomplete and

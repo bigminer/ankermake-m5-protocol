@@ -1,5 +1,34 @@
 # Local Control Research: Decoupling from Anker
 
+> ## ⚠️ SUPERSEDED FRAMING — read this before the document
+>
+> **The "full control parity" claim below is refuted (2026-07-28).** Start at
+> [`INDEX.md`](INDEX.md).
+>
+> The transport half of this document is sound and was proven: the local-broker
+> redirect works, PPPP is a dead end for control, and the cloud dependency was
+> indeed transport. **The control half is wrong.**
+>
+> `ankerctl` does **not** have control parity with the official app, and the
+> remaining work is **not** merely transport redirection. Where the protocol has
+> a dedicated opcode, `ankerctl` frequently improvises raw G-code that the
+> printer's communication module never sees — which is why several actions cannot
+> be confirmed and one cannot work at all:
+>
+> - **Fan** — we send `M106`; the native `FAN_SPEED` (`0x3ed`/1005) is never used,
+>   so the module's state never updates and nothing confirms (INDEX F-003, F-022).
+> - **Jog** — invented `G91`/`G1`/`G90`; `MOVE_STEP`/`MOVE_DIRECTION` are declared
+>   and never sent, and X/Y is refused outright by `NO_MOTION_BEFORE_HOMING`
+>   (F-016, F-021).
+> - **Homing** — not achievable as we invoke it. `G36` is the entry point and
+>   arms the probe; a bare `G28` from us cannot (F-010, F-011).
+> - **The module↔Marlin link is invisible to us entirely** — zero `1043` in a full
+>   print capture (F-006).
+>
+> So this remains **protocol reverse-engineering**, and treating it as solved
+> transport work is how several actions came to be built on invented commands.
+> The evidence sections below are still useful; the strategic conclusion is not.
+
 Goal: reclaim full, independent ownership of the AnkerMake M5C — run the printer
 **entirely on the local network with Anker's cloud permanently severed**, so it
 keeps working regardless of Anker's service status (shutdown, account lockout,
