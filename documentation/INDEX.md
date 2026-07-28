@@ -183,6 +183,21 @@ source never authorises sending.
 
 ## 10. Updating this file
 
+- **A code change that invalidates a fact row updates that row in the same
+  commit.** Not the next one. An index that is confidently wrong is worse than no
+  index — it will be trusted. This rule exists because F-007 went stale one
+  commit after the index was created, in exactly the way §9's drift warning
+  predicted.
+
+  **Which rows drift: the ones describing *this repo*, because we change it.**
+  Facts about the printer do not drift — we cannot edit firmware or past
+  observations. So after touching `web/`, `static/`, or `libflagship/`, check the
+  Tier 3 rows: **F-007, F-008, F-021, F-022**. Find them with:
+
+  ```sh
+  grep -nE 'web/|static/|libflagship/' documentation/INDEX.md
+  ```
+
 - **Add a trigger (§1) whenever you find yourself deriving something known.** That
   table is the mechanism; the rest is reference.
 - **Add an anti-pattern (§3) when a method error costs time** — worth more than
