@@ -166,12 +166,16 @@ above), a supervised run should validate the unprepared path first, with
 1. **`G36` was never given a hot enough nozzle.** The 2026-07-09 sessions ran at
    150C; `EXTRUDE_MINTEMP` is **160**, and `G28.cpp:263` gates real probing on it.
    "Not honored by production firmware" is `REFUTED`.
-2. **`ANKERCTL_PREPRINT_G36` does not reach the named action.** It gates the
-   *legacy* path only (`web/util.py:232`); `printer_actions.py:512` calls
-   `prepare_bed` — which sends `G36` — with no such check. Setting it `false`
-   changes nothing about `print_start`.
+2. ~~**`ANKERCTL_PREPRINT_G36` does not reach the named action.**~~ **That was
+   wrong, and is corrected here (2026-07-28).** It does reach it, one layer up:
+   `web/__init__.py:776` sets `extract_temperatures` from the flag, and that is
+   the only production caller of `ArtifactStore.stage`. Flag off → no
+   temperatures → `artifact.bed_celsius is None` → `prepare_bed` and `G36` never
+   run. Two tests in `test_web_ui.py` now pin both directions of that linkage.
 
-Tracked as issue #25, which blocks #18. See [`INDEX.md`](INDEX.md) §1.
+Tracked as issue #25, re-scoped from "ungated defect" to "`G36` is duplicative
+when the flag is deliberately enabled". See [`INDEX.md`](INDEX.md) §1 and the D1
+correction in [`audit-2026-07-27.md`](audit-2026-07-27.md).
 
 ## Web homing disabled (incidents 2026-07-13)
 

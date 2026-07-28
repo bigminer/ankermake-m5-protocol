@@ -73,7 +73,7 @@ goal. Briefly:
 
 | Next | Why | Needs printer? |
 | --- | --- | --- |
-| [#25](https://github.com/bigminer/ankermake-m5-protocol/issues/25) — ungated `G36` in `print_start` | Blocks #18; cheapest real unblock | No |
+| [#25](https://github.com/bigminer/ankermake-m5-protocol/issues/25) — `G36` in `print_start` preparation | **Re-scoped 2026-07-28.** It is *not* ungated — the audit was wrong; `ANKERCTL_PREPRINT_G36` gates it via temperature extraction at `web/__init__.py:776`, now pinned by tests. What remains is that `G36` is duplicative when the flag is deliberately on | No |
 | [#28](https://github.com/bigminer/ankermake-m5-protocol/issues/28) — capture the official app | **The bottleneck.** Unblocks #29 *and* the payload half of #12 in one session | Yes — operator, plus a topology change |
 | [#29](https://github.com/bigminer/ankermake-m5-protocol/issues/29) — `fan_setting` → native `FAN_SPEED` | Makes one action genuinely confirmable. Blocked by #28 | No, once #28 lands |
 | [#26](https://github.com/bigminer/ankermake-m5-protocol/issues/26) — map control layer to firmware | The ledger's firmware section read 2 of 3 config files | No |

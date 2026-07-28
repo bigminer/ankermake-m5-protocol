@@ -26,7 +26,7 @@ If your next move appears here, the answer already exists. Do not derive it.
 | capture MQTT to learn what the module sends Marlin | **Impossible.** Zero `1043` in a full print; that link is invisible | F-006 |
 | add a "fresh state" gate to any action | The M5C **never pushes `state`**. It is stale 15s after a poll. This has broken two actions already | §5 |
 | send an opcode we have never sent | Its payload is unknown and **there is no convention to infer from** — 4 shapes across 3 opcodes | §5 |
-| run supervised validation #18 | Blocked — `print_start` sends ungated `G36`, and `ANKERCTL_PREPRINT_G36` does not reach it | issue #25 |
+| conclude `print_start` sends `G36` ungated | **It does not.** `ANKERCTL_PREPRINT_G36` gates it via `extract_temperatures` at `web/__init__.py:776` — no temps, no `bed_celsius`, no preparation. An audit got this wrong by reading `printer_actions.py` alone | A-09, issue #25 |
 | conclude anything from `M105` about the fan | No fan field, and `REPORT_FAN_CHANGE` is compiled out | F-022 |
 
 ## 2. Evidence rule
@@ -54,6 +54,7 @@ Firmware is strong evidence of intent, not byte-truth. Full rules:
 | A-06 | Ran a live test to answer what one grep answers | Printer time spent on a source question |
 | A-07 | Searched only the Marlin repo, concluded a component was unpublished | Missed `eufyMake-linux-sdk`, `anker_gcode/`, `feature/anker/` |
 | A-08 | Kept the scarier of two conflicting observations without reconciling | `G36` "wedges the queue" — one run said so, two later did not |
+| A-09 | Concluded a gate was missing from one file's absence, without asking who fills the field it branches on | "`print_start` sends `G36` ungated" — wrong; the gate is one layer up, and a passing test already proved it |
 
 ## 4. Facts — with a command to verify each
 

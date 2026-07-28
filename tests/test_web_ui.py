@@ -352,6 +352,49 @@ class WebUiTestCase(unittest.TestCase):
         self.assertIn(b"print-start action was rejected", resp.data)
         self.assertIn(b"idle_printer_required", resp.data)
 
+    def test_preprint_g36_gates_preparation_for_the_named_action(self):
+        """ANKERCTL_PREPRINT_G36 off must mean the named path never prepares.
+
+        The gate is indirect and easy to misread: the route decides whether to
+        extract temperatures, and print_start only prepares -- and only sends
+        G36 -- when the artifact carries a bed temperature.  Nothing in
+        printer_actions.py mentions the flag, which led an audit to conclude the
+        named action had dropped the legacy path's gate.  It has not, but the
+        linkage was untested and so could regress without anyone noticing.
+        """
+        actions, submitted = self._ungate_print_start()
+        app.config["preprint_g36"] = False
+
+        gcode = io.BytesIO(b"M190 S60\nM109 S220\nG28\n")
+        resp = self.client.post(
+            "/api/files/local",
+            data={"print": "true", "file": (gcode, "cube.gcode")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        # Temperatures unextracted => no preparation stage => no G36.
+        artifact = app.printer_artifacts.get(submitted[0].action.artifact)
+        self.assertIsNone(artifact.bed_celsius)
+        self.assertIsNone(artifact.nozzle_celsius)
+
+    def test_preprint_g36_on_extracts_temperatures_for_the_named_action(self):
+        """The same linkage in the other direction, so the test cannot pass vacuously."""
+        actions, submitted = self._ungate_print_start()
+        app.config["preprint_g36"] = True
+
+        gcode = io.BytesIO(b"M190 S60\nM109 S220\nG28\n")
+        resp = self.client.post(
+            "/api/files/local",
+            data={"print": "true", "file": (gcode, "cube.gcode")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        artifact = app.printer_artifacts.get(submitted[0].action.artifact)
+        self.assertEqual(artifact.bed_celsius, 60)
+        self.assertEqual(artifact.nozzle_celsius, 220)
+
     def test_slicer_upload_reports_a_staging_refusal(self):
         self._ungate_print_start()
         app.config["preprint_g36"] = True
