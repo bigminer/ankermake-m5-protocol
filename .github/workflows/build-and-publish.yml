@@ -68,27 +68,36 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
     
+    # Release steps run only for a semantic-version tag.
+    #
+    # They previously ran on `github.event_name == 'push'`, which is also true
+    # for pushes to main and upcoming/*.  git-release accepts only a semver tag
+    # ref, so it failed on every main push and left the branch permanently red —
+    # which teaches everyone to ignore check status, and hides a real failure
+    # when one arrives.  The archives are consumed solely by the Release step,
+    # so they are gated on the same condition rather than built and discarded.
     - name: Create release directory
+      if: startsWith(github.ref, 'refs/tags/v')
       run: mkdir release
-      
+
     - name: Zip Release
-      if: github.event_name == 'push'
+      if: startsWith(github.ref, 'refs/tags/v')
       uses: TheDoctor0/zip-release@0.7.1
       with:
         type: 'zip'
         filename: release/ankerctl-${{ github.ref_name }}.zip
         exclusions: '*.git* /*release/*'
-        
+
     - name: GZip Release
-      if: github.event_name == 'push'
+      if: startsWith(github.ref, 'refs/tags/v')
       uses: TheDoctor0/zip-release@0.7.1
       with:
         type: 'tar'
         filename: release/ankerctl-${{ github.ref_name }}.tar.gz
         exclusions: '*.git* release'
-        
+
     - name: Release
-      if: ${{ github.event_name == 'push' }}
+      if: startsWith(github.ref, 'refs/tags/v')
       uses: docker://antonyurchenko/git-release:v5.0.1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
