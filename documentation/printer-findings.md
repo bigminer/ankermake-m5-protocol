@@ -224,9 +224,81 @@ of it so far. Still: confirm telemetry is flowing before sending anything.
 
 ---
 
-## Homing — the central open problem
+## Homing — solved from source (2026-07-28)
 
-**Nothing we can send makes this printer home Z. Four attempts, all failed.**
+**The central open problem has an answer, and it is not a missing opcode.**
+
+`G28.cpp:224` `anker_home_z_safely()` is the routine this build's `G28` actually
+calls for Z (via `WS1_HOMING_5X`, `G28.cpp:594`). It performs real Z homing only
+when **two** conditions hold:
+
+```cpp
+if (thermalManager.degHotend(0) >= EXTRUDE_MINTEMP && anker_align.g36_running_flag == true)
+{  homeaxis(Z_AXIS); ... Probe_homeaxis(Z_AXIS, 1); ... }
+else
+{  anker_homing.is_home_z = true; }        // no motion, no probing — only a flag
+```
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| Real Z homing requires nozzle **≥ `EXTRUDE_MINTEMP`** *and* **`g36_running_flag`** | `G28.cpp:263` | `CONFIRMED` |
+| `EXTRUDE_MINTEMP` is **160C** | `Configuration.h:719` | `CONFIRMED` |
+| `g36_running_flag` is set `true` in **exactly one place** — `auto_align()`, i.e. **`G36`** | `anker_align.cpp:96`; cleared `:130`, `:175`, and in `anker_pause.cpp` | `CONFIRMED` |
+| **`G36` calls `G28` itself** — it is the entry point for homing, not a separate leveling command | `anker_align.cpp:100` | `CONFIRMED` |
+| **Therefore a standalone `G28` can never home Z.** It takes the `else` branch and only marks `is_home_z=true` | follows from the above | `CONFIRMED` |
+| A failed alignment (`ABS(z1-z2)` over range, or overpressure) calls **`kill()`** — a hard halt needing a reset | `anker_align.cpp:122-131` | `CONFIRMED` |
+| Z homes at **`"G1 X2 Y-23 F12000"`**, off the bed — not bed centre | `ANKER_Z_HOMING_SCRIPT`, `pins_ANKER_V8110_V0_4.h` | `CONFIRMED` |
+
+**This explains every standalone homing failure.** Raw `G28`, `MOVE_ZERO`, all of
+them took the `else` branch. The probe never engaged because the firmware never
+asked it to. Not a gatekeeper, not an untrusted XY frame, not a missing opcode.
+
+### 🔥 The `G36` experiments were 10C too cold
+
+`EXTRUDE_MINTEMP` is **160**. The 2026-07-09 supervised G36 sessions heated the
+nozzle to **150C** (`printer-test-validation.md:104`). So `auto_align()` armed the
+flag, called `G28`, `anker_home_z_safely()` evaluated `150 >= 160` as false, took
+the `else` branch, and returned without probing or completing — exactly the
+recorded *"acknowledged receipt but performed no leveling motion… never returned a
+completion `ok`."*
+
+**`REFUTED`: "production firmware does not honor `G36`."** It was never given a
+hot enough nozzle. That conclusion is still repeated in the README, the LaunchAgent
+comment, and `printer-test-validation.md`, and all of them need revising.
+
+The fixture used 150 because it is the *minimum* of our own clamp
+(`web/util.py:24`) — a safe-looking low value that sits under the firmware floor.
+
+**This also reconciles the contested "wedge".** The early experiment's wedged
+queue and required power cycle is consistent with the `kill()` at
+`anker_align.cpp:131` after a failed alignment; the 2026-07-09 runs never reached
+probing, so they saw `Idle / Ready` and a clean cooldown. Both records are
+accurate — different failure modes.
+
+### ⚠️ Correction to the 2026-07-27 entry above
+
+That entry says *"probing is NOT temperature-gated"* on the strength of
+`//#define PREHEAT_BEFORE_PROBING`. **That is true of stock Marlin's preheat
+feature and false of this machine** — the Anker path carries its own threshold at
+`G28.cpp:263`. `REFUTED`. Right about the flag, wrong about the machine.
+
+### 🚫 What this does not license
+
+**Nothing here justifies sending a homing command.** The physically important
+unknown is untouched: the `else` branch performs no Z motion, so **what actually
+drove the nozzle into the plate is still `UNVERIFIED`.** Leading candidate:
+`is_home_z=true` establishes a false datum and a later move works from it. Needs
+the rest of `G28.cpp` traced.
+
+Knowing the threshold does **not** make "heat to 160C and send `G36`" safe — a
+failed alignment `kill()`s the printer, and the descent mechanism is unexplained.
+Home stays disabled. See
+[#27](https://github.com/bigminer/ankermake-m5-protocol/issues/27).
+
+### The four failed attempts, and why
+
+**Nothing we sent made this printer home Z. Four attempts, all failed** — now
+explained by the gate above rather than by four separate mysteries.
 
 | Attempt | Result | Status |
 | --- | --- | --- |
