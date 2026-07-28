@@ -353,7 +353,84 @@ The board is a capable peer, not a sensor: the UART surface includes probe
 threshold set/get, raw ADC streaming on/off, PID autotune, hardware/software
 version, and an error notify (`uart_nozzle_tx.h:65-80`).
 
-### 🎯 The strongest remaining lead — and it is read-only
+### 🔑 `1005` IS fan speed — "this printer publishes no fan-state" is REFUTED (2026-07-28)
+
+Observed passively during a complete Orca print. We sent nothing.
+
+| `_t` | Message | Print context |
+| --- | --- | --- |
+| 311 | `{"commandType": 1005, "value": 99}` | early layers, progress 4% |
+| 528 | `{"commandType": 1005, "value": 0}` | progress 100%, end G-code running |
+
+The part cooling fan coming on at 99% in the early layers of a PLA print and going
+off at the end. Exactly two `1005` messages in the whole run.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| **`1005` is fan speed**, in percent (0-100) | 99 during print, 0 at end | `CONFIRMED` |
+| It is published **on change only**, never continuously | 2 messages across ~25 minutes | `CONFIRMED` |
+| **The printer therefore does report fan state.** The long-standing "no fan-state fact" claim is wrong | the above | **`REFUTED`** |
+| Our raw `M106`/`M107` over `1043` does not update it | attended test 2026-07-27: fan audibly ran, `1005` stayed 0 | `CONFIRMED` |
+| The mechanism: `//#define REPORT_FAN_CHANGE` is commented out, so the **MCU never tells the module** a G-code changed the fan. The module only reports fan changes it originates | `Configuration_adv.h`; `temperature.cpp` | `CONFIRMED` |
+
+**This resolves the `fan_setting` question, and against the framing we had.** The
+action is not unconfirmable-by-design. It is unconfirmable *as implemented*,
+because ankerctl drives the fan with raw G-code that bypasses the module's
+bookkeeping — the same class of defect as the jog path. The fix is to send the
+native `ZZ_MQTT_CMD_FAN_SPEED` (`0x3ed` = 1005) so the module knows, and to map
+inbound 1005 into the snapshot. `web/service/state.py` `normalize()` has no 1005
+branch, so the value is currently discarded on arrival.
+
+Not established: **which** fan. Part-cooling is the natural reading from the
+profile and timing, but nothing here distinguishes it from another fan.
+
+### `1026` is a homing event notice
+
+`{"commandType": 1026, "value": 0}` appeared exactly once per capture, both times
+immediately after a homing operation: at the state 8→1 transition following the
+start G-code's `G28`, and again right after progress hit 100% with the end
+G-code's `G28 X0 Y0`.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| The printer publishes `1026` (`MOVE_ZERO`) as a **notice** correlating with homing | two occurrences, both post-`G28` | observation `CONFIRMED`; exact semantics `UNVERIFIED` |
+| The type is **bidirectional** — we send it as a command (`value 2` drove the nozzle into the plate), the printer emits it as a notice (`value 0`) | 2026-07-13 incident vs this capture | `CONFIRMED` |
+
+**Do not infer that sending `value 0` is safe.** Nothing here establishes what an
+inbound-direction value means as a command. But this does give a **homing-event
+signal in telemetry**, which issues #12 and #27 previously assumed did not exist.
+
+### Passive print capture — the module's serial link stays invisible (2026-07-28)
+
+Read-only. The operator started an Orca print with a clear bed and power to hand;
+this session sent **nothing**. A passive `/ws/mqtt` collector logged every message
+from before job start through preheat, homing, and into printing.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| **Zero `1043` messages across an entire job start, including homing** | 0 of ~300 captured messages | `CONFIRMED` |
+| **The communication module does not relay its Marlin serial link over MQTT.** It publishes status notices only | follows from the above | `CONFIRMED` |
+| **Therefore the `M3020` threshold hypothesis is not testable over MQTT** — and neither is any "what does the module send Marlin at job start" question | — | `CONFIRMED` |
+| **State `8` = preparation** — preheat, home, level. Held ~123s, then `1` (printing) | `1000/subType 1` transitions | `CONFIRMED` |
+| Preheat matched the slicer start G-code exactly: nozzle **150** standby → **220**, bed **60** | `1003`/`1004` targets | `CONFIRMED` |
+| `1052` is sent **once** at job start (`total_layer: 43`), not continuously | one message in the run | `CONFIRMED` |
+| `1037 {"value": 1}` is emitted at job start and again at the state-1 transition; meaning unknown | two messages | `UNVERIFIED` |
+| **The printer publishes `1026` (`MOVE_ZERO`) as a notice, `{"value": 0}`**, during a normal run | one message at the printing transition | observation `CONFIRMED`; meaning `UNVERIFIED` |
+
+**The `1026` observation is worth following.** We have only ever treated 1026 as a
+*command* — it is the opcode that drove the nozzle into the plate on 2026-07-13
+when sent with `value 2`. The printer emits it as a **notice** with `value 0`
+around the point homing completes. So the type is bidirectional and `value`
+encodes different things by direction. Do not infer that sending `value 0` is
+safe; nothing here establishes that.
+
+**Consequence for issue #27.** The probe-threshold lead cannot be pursued from
+our side of the wire. Seeing the module↔Marlin link needs either physical serial
+access to that UART or the module's own firmware — `eufyMake-linux-sdk` is
+published and unexamined. Everything MQTT can tell us about job start, it has now
+told us.
+
+### 🎯 The lead that prompted the capture (now closed — kept for the reasoning)
 
 **The probe threshold is synchronised between Marlin and the board at runtime,
 and something outside Marlin can set it.** `uart_nozzle_rx.cpp:292` receives a
