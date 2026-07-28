@@ -529,25 +529,30 @@ $(function () {
             status.attr("class", "small text-success mb-0 mt-3")
                 .text(`${label} confirmed by printer telemetry.`);
         } else if (action.status === "indeterminate") {
-            // ankerctl has no fan reading, so a fan request can never be
-            // confirmed.  That is the expected outcome of a working request,
-            // not a failure, and alarm styling every time would teach the
-            // operator to ignore this line.  Gated on the action as well as
-            // the reason on purpose — an allowlist for the one action whose
-            // unconfirmability supervised validation established, so a future
-            // unconfirmable action still reads as an alarm until it has its own
-            // evidence.
+            // A fan request we issue can never be confirmed.  That is the
+            // expected outcome of a working request, not a failure, and alarm
+            // styling every time would teach the operator to ignore this line.
             //
-            // The copy blames no layer in particular, deliberately.  Whether
-            // the *printer* reports fan state is unresolved: 1005 is named
-            // FAN_SPEED in the protocol table but did not move during an
-            // attended test while the fan audibly ran, which is equally
-            // consistent with it being a command echo and with the upper
-            // computer not seeing our raw M106.  See printer-findings.md,
-            // 2026-07-27.  A silently disconnected printer also lands here.
+            // Why it cannot be confirmed — and note this is NOT "the printer
+            // reports no fan state", which was refuted on 2026-07-28.  The
+            // printer does report it, as commandType 1005 in percent, observed
+            // at 99 mid-print and 0 at completion, and it is now a tracked fact
+            // (FACT_PATHS "fan").  But it is published only for fan changes the
+            // communication module originates.  We send raw M106, and Marlin's
+            // REPORT_FAN_CHANGE is compiled out, so the MCU never tells the
+            // module our command happened and no 1005 ever follows it.
+            //
+            // This branch disappears once fan_setting sends the native
+            // FAN_SPEED opcode instead of M106.  See documentation/INDEX.md
+            // F-003, F-008, F-022.
+            //
+            // Gated on the action as well as the reason on purpose — an
+            // allowlist, so a future unconfirmable action still reads as an
+            // alarm until it has its own evidence.  A silently disconnected
+            // printer also lands here.
             if (action.action === "fan_setting" && action.reason === "confirmation_unavailable") {
                 status.attr("class", "small text-info mb-0 mt-3")
-                    .text(`${label} sent. ankerctl has no fan reading to confirm it against.`);
+                    .text(`${label} sent. ankerctl cannot confirm this request.`);
             } else {
                 status.attr("class", "small text-danger mb-0 mt-3")
                     .text(action.action === "stop"

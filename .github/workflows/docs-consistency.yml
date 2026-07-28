@@ -1,0 +1,25 @@
+name: Docs consistency
+
+# Blocks any push or PR that reintroduces a refuted claim, lets an INDEX fact
+# drift from the code it describes, or breaks an INDEX link.
+#
+# The system of record is only worth trusting if something checks it. See
+# documentation/INDEX.md section 10.
+on:
+  push:
+  pull_request:
+
+jobs:
+  docs-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check for contradictions and fact drift
+        run: python scripts/check-docs.py

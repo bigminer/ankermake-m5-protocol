@@ -187,6 +187,12 @@ There is **no local control protocol to discover.** The official app drives the
 printer entirely through Anker's cloud MQTT, using the command set `ankerctl`
 already implements. Locally, PPPP carries only camera/live and file upload.
 
+⚠️ **The next sentence is `REFUTED` (2026-07-28) — see the banner at the top of
+this file.** `ankerctl` does **not** have control parity: it improvises raw
+G-code where the protocol has dedicated opcodes (fan, jog), and cannot home at
+all. The work *is* protocol reverse-engineering. Treating it as settled transport
+work is how several actions came to be built on invented commands.
+
 The useful consequence: `ankerctl` already has **full control parity** with the
 official app — it is simply equally cloud-dependent. Decoupling is therefore not
 a protocol-reverse-engineering problem; it is a *transport-redirection* problem.

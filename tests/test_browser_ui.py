@@ -700,13 +700,13 @@ def test_validation_mode_renders_server_owned_thermal_and_fan_outcomes(
         }});
         """
     )
-    # ankerctl has no fan reading, so a fan request can never be confirmed.
-    # Reporting that as a failure every time would train the operator to ignore
-    # the outcome line, so it reads as information.  The copy attributes the gap
-    # to ankerctl, not the printer -- see printer-findings.md, 2026-07-27.
+    # A fan request we issue can never be confirmed, because we send raw M106
+    # and the module never learns of it.  NOT because the printer reports no fan
+    # state -- it reports 1005, see documentation/INDEX.md F-003.  Reporting this
+    # as a failure every time would train the operator to ignore the line.
     fan = page.locator("#fan-action-status").inner_text().lower()
     assert "sent" in fan
-    assert "no fan reading" in fan
+    assert "cannot confirm" in fan
     assert "could not be confirmed" not in fan
     assert "confirmation_unavailable" not in fan
     assert "text-info" in page.locator("#fan-action-status").get_attribute("class")

@@ -75,6 +75,23 @@
   If a commit would include any of the above, stop and tell the operator instead
   of committing.
 
+## Keep the system of record consistent
+
+Run alongside the secret sweep, before every stage, commit, or push:
+
+```sh
+python scripts/check-docs.py
+```
+
+It fails on a refuted claim reappearing without a correction, on an
+`INDEX.md` fact whose verify command no longer finds anything, and on a dead
+link. **Fix the contradiction rather than widening the exclusion list.**
+
+**Code comments count.** A comment asserting printer behaviour is a claim, and
+it is the one a future session reads while editing the code it describes. When
+a fact changes, grep for comments repeating the old version, and prefer citing
+a fact ID (`INDEX F-003`) over restating it.
+
 ## Agent skills
 
 ### Issue tracker

@@ -850,11 +850,22 @@ class MqttActionProtocol:
                         return reply
 
     def prepare_bed(self, printer_id, timeout):
-        """Run the firmware's own bed-preparation routine to completion.
+        """Send G36 out-of-band and wait for M400's terminal "ok".
 
         G36 is sent out-of-band because the printer rejects it when embedded in
-        uploaded G-code.  M400 queues behind it and supplies the terminal "ok"
-        only once probing has finished.
+        uploaded G-code.  M400 queues behind it and supplies the terminal "ok".
+
+        ⚠️ This has never been observed to complete a probing routine, and the
+        wording that claimed it did was removed on 2026-07-28.  What the firmware
+        actually does (documentation/INDEX.md F-010, F-011): G36 arms
+        `g36_running_flag` and calls G28 itself, and G28 only probes when the
+        nozzle is at or above EXTRUDE_MINTEMP (160C).  Our supervised G36 runs
+        heated to 150C and so never probed -- which is why "production firmware
+        does not honour G36" was believed for weeks and is now refuted.
+
+        This caller heats the nozzle to the job's real temperature first, so the
+        threshold is probably satisfied here.  That is untested.  Issue #25
+        covers it, and #18 must not run until it is settled.
         """
         _require_selected_printer(self._app, printer_id)
         with self._app.svc.borrow("mqttqueue") as mqtt:

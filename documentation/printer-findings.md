@@ -1013,9 +1013,14 @@ experiment jog needs for `MOVE_STEP`/`MOVE_DIRECTION`
 ([`jog-confirmation-research.md`](jog-confirmation-research.md), open question 2),
 so one attended app-capture session settles both.
 
-Until it is run, **"this printer publishes no fan-state" is not a supported
-claim.** The supported claim is narrower: *ankerctl cannot confirm a fan request
-it issues as raw G-code.*
+✅ **Settled 2026-07-28 without needing that test.** A passive print capture
+observed `1005` at 99 mid-print and 0 at completion — see the `1005` entry above.
+**"This printer publishes no fan-state" is `REFUTED`.** The accurate claim is the
+narrower one: *ankerctl cannot confirm a fan request it issues as raw G-code*,
+because the module never learns of it.
+
+The `0x3ed` payload is still unknown and still must be captured rather than
+guessed — that remains the blocker for making `fan_setting` confirmable.
 
 **Correction to the `M114` row above.** That row calls `Count X:` "raw stepper
 counts". On this build it is not: `M114_DETAIL`, `M114_REALTIME`, and

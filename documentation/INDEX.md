@@ -181,13 +181,43 @@ source never authorises sending.
 | [`../CONTEXT.md`](../CONTEXT.md) | Printer-action vocabulary |
 | [`../handoff.md`](../handoff.md) | Current session state |
 
-## 10. Updating this file
+## 10. Keeping this true
+
+**It is checked, not trusted.** Run before every stage, commit, or push — and CI
+runs it on every push and PR:
+
+```sh
+python scripts/check-docs.py
+```
+
+| Check | Catches |
+| --- | --- |
+| `REFUTED-LEAK` | A §6 claim reappearing in a doc with no correction near it |
+| `VERIFY-ROT` | A fact's verify command finding nothing — it drifted from the code |
+| `DEAD-LINK` | A pointer here going nowhere |
+| `TIER-3-DRIFT` | Staged changes to `web/`/`static/`/`libflagship/` without touching this file (advisory) |
+
+It found four leaks on its first run that a manual sweep had missed, including
+one in the ledger itself. **If it fails, fix the contradiction — do not widen the
+exclusion.** The one legitimate edit is the `MARKERS` vocabulary, when a passage
+retires a claim in wording the regex does not yet recognise.
+
+### Rules
 
 - **A code change that invalidates a fact row updates that row in the same
   commit.** Not the next one. An index that is confidently wrong is worse than no
   index — it will be trusted. This rule exists because F-007 went stale one
   commit after the index was created, in exactly the way §9's drift warning
   predicted.
+
+- **Code comments are part of the system of record.** A comment asserting printer
+  behaviour is a claim, and it is the one a future session reads *while editing
+  the thing it describes* — so a stale one does the most damage. When a fact
+  changes, grep the code for comments repeating the old version. Both offenders
+  found on 2026-07-28 were in this class: `ankersrv.js` said "ankerctl has no fan
+  reading" hours after the fan fact was wired, and `prepare_bed`'s docstring
+  described `G36` completing a probing routine that has never been observed.
+  Prefer citing a fact ID in the comment (`INDEX F-003`) over restating it.
 
   **Which rows drift: the ones describing *this repo*, because we change it.**
   Facts about the printer do not drift — we cannot edit firmware or past
