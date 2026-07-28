@@ -74,10 +74,13 @@ goal. Briefly:
 | Next | Why | Needs printer? |
 | --- | --- | --- |
 | [#25](https://github.com/bigminer/ankermake-m5-protocol/issues/25) — ungated `G36` in `print_start` | Blocks #18; cheapest real unblock | No |
-| `fan_setting` → native `FAN_SPEED` opcode | Makes one action genuinely confirmable. **Payload must be captured, not guessed** | Capture only |
+| [#28](https://github.com/bigminer/ankermake-m5-protocol/issues/28) — capture the official app | **The bottleneck.** Unblocks #29 *and* the payload half of #12 in one session | Yes — operator, plus a topology change |
+| [#29](https://github.com/bigminer/ankermake-m5-protocol/issues/29) — `fan_setting` → native `FAN_SPEED` | Makes one action genuinely confirmable. Blocked by #28 | No, once #28 lands |
 | [#26](https://github.com/bigminer/ankermake-m5-protocol/issues/26) — map control layer to firmware | The ledger's firmware section read 2 of 3 config files | No |
+| [#30](https://github.com/bigminer/ankermake-m5-protocol/issues/30) — per-fact freshness | On-change facts read `stale` while accurate. Has already cost two runs | No |
 | [#12](https://github.com/bigminer/ankermake-m5-protocol/issues/12) — jog contract | Needs design first; `needs-triage`, not agent-ready | No |
 | [#27](https://github.com/bigminer/ankermake-m5-protocol/issues/27) — probe discriminator | Gates all homing work. Not answerable over MQTT | No |
+| [#31](https://github.com/bigminer/ankermake-m5-protocol/issues/31) — CI Release step | Every `main` build shows a red X; trains everyone to ignore checks | No |
 
 **#15 can close** once the operator adds three thermal contracts to the
 LaunchAgent — `nozzle_target`, `bed_target`, `heater_off`. The fan half is
@@ -95,7 +98,14 @@ separate and now depends on the native-opcode work above.
 | #18 | Open; **blocked on #25** |
 | #19 | Open; blocked on the validations |
 | #25, #26, #27 | New, offline, unstarted |
+| #28 | New. `ready-for-human` — needs the operator and a topology revert. **Blocks #29 and part of #12** |
+| #29, #30, #31 | New, offline. #29 blocked by #28; #30 and #31 unblocked |
 | #5, #7, #8, #10, #11, #14 | Closed |
+
+**Every known task is now on the tracker.** Four items had been living only in
+prose until 2026-07-28 — the native fan opcode, the app capture, per-fact
+freshness, and the CI defect. If a session finds work that exists only in a
+document, open an issue for it rather than leaving it here.
 
 ## Running a supervised validation
 
