@@ -332,6 +332,46 @@ on that pin at all** — a pin read can never say anything about a UART strain g
 **The heater save/restore in `Anker_Zoffset::run()` is dead code** here —
 `ANKER_Z_OFFSET_FUNC` is `0` (`ANKER_Config.h:64`). Do not cite it.
 
+### The probe chain, end to end (2026-07-28)
+
+| Step | Where | Status |
+| --- | --- | --- |
+| 1. Marlin arms the board: `uart_nozzle_tx_point_type(POINT_G28, 1)` + `probe_start(leveing_value)` | `motion.cpp:2613-2614` | `CONFIRMED` |
+| 2. Probe endstop enabled just before the move | `motion.cpp:1792` `anker_level_set_probing_paused(true, …)` | `CONFIRMED` |
+| 3. Descend `1.5 × max_length(Z)` at `Z_PROBE_FEEDRATE_FAST` | `motion.cpp:2609`, `:2616` | `CONFIRMED` |
+| 4. **The nozzle board** detects strain and sends an overpressure message over UART | `uart_nozzle_rx.cpp:332` | `CONFIRMED` |
+| 5. Marlin acts on it **only if `endstops.z_probe_enabled`** → `planner.endstop_triggered(Z)` | `uart_nozzle_rx.cpp:333-336` | `CONFIRMED` |
+| 6. No trigger → `set_axis_is_at_home()` is called **anyway**, returns 0, `G28` sets `is_again_probe_homing` and retries; after `ANKER_Z_AGAIN_HOMING_NUM`, `kill()` | `motion.cpp:2616-2625`; `anker_homing.cpp:224-234` | `CONFIRMED` |
+
+**The architectural point: trigger detection lives on the nozzle co-processor**,
+arrives asynchronously over UART, and is gated inside Marlin by
+`endstops.z_probe_enabled`. It is not an endstop pin and never was. The board is
+also told *which* operation is probing — `POINT_G28`, `POINT_G36`, `POINT_G29` —
+so its behaviour can differ per operation.
+
+The board is a capable peer, not a sensor: the UART surface includes probe
+threshold set/get, raw ADC streaming on/off, PID autotune, hardware/software
+version, and an error notify (`uart_nozzle_tx.h:65-80`).
+
+### 🎯 The strongest remaining lead — and it is read-only
+
+**The probe threshold is synchronised between Marlin and the board at runtime,
+and something outside Marlin can set it.** `uart_nozzle_rx.cpp:292` receives a
+value and assigns `anker_probe_set.leveing_value`, logging `echo:M3020 V%d`;
+`M3011_3100.cpp` implements `M3020 V<n>` to push one down.
+
+**Hypothesis:** the communication module sends `M3020` (or an equivalent
+threshold/calibration step) as part of its job-start sequence, and never does so
+for a standalone command. A board holding a wrong or uninitialised threshold
+would accept the arm, never report a trigger, and let the descent run to
+`1.5 × max_length` — exactly the observed plate strike.
+
+**This is testable read-only**, with no command from us: capture the MQTT G-code
+stream during a normal Orca-started print and look for `M3020`, other `M30xx`
+traffic, or any probe/calibration command the module issues that we never send.
+That single capture would also settle the wider "what does the module send at job
+start" question. `UNVERIFIED` — worth doing before anything else.
+
 ### Still unanswered: the temperature discriminator
 
 **No temperature term appears anywhere in the probe-arming or probe-sensing path
@@ -340,11 +380,15 @@ read so far.** The `>= EXTRUDE_MINTEMP` check exists only in
 deferred descent that actually moves.
 
 So *why a hot print homes and a cold standalone command plunges is still
-`UNVERIFIED`.* It may not be temperature at all. The untested candidate now is
-**nozzle-board state**: `probe_start` and `uart_nozzle_tx_point_type` assume a
-board that is initialised and tared, and `src/feature/anker/handshake.cpp` exists
-and has not been read. A board that never handshook would accept the arm command
-and simply never report a trigger — which is exactly the observed behaviour.
+`UNVERIFIED`,* and after reading the full probe chain **there is no evidence it is
+temperature at all.** Nothing in arming, descent, or trigger handling references
+nozzle temperature.
+
+`handshake.cpp` was read and **does not support the earlier guess**: it is a
+nozzle-*presence* interlock that gates `HEATER_EN_PIN` on a pin read, not a probe
+initialisation or tare. That hypothesis is dropped.
+
+The live candidate is now the threshold-synchronisation lead above.
 
 ### 🚫 What this does not license
 
