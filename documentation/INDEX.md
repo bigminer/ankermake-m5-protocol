@@ -192,7 +192,7 @@ python scripts/check-docs.py
 
 | Check | Catches |
 | --- | --- |
-| `REFUTED-LEAK` | A §6 claim reappearing in a doc with no correction near it |
+| `REFUTED-LEAK` | A §6 claim reappearing in a doc **or an agent memory note**, with no correction near it |
 | `VERIFY-ROT` | A fact's verify command finding nothing — it drifted from the code |
 | `DEAD-LINK` | A pointer here going nowhere |
 | `TIER-3-DRIFT` | Staged changes to `web/`/`static/`/`libflagship/` without touching this file (advisory) |
@@ -201,6 +201,12 @@ It found four leaks on its first run that a manual sweep had missed, including
 one in the ledger itself. **If it fails, fix the contradiction — do not widen the
 exclusion.** The one legitimate edit is the `MARKERS` vocabulary, when a passage
 retires a claim in wording the regex does not yet recognise.
+
+⚠️ **Memory coverage is local-only.** The 12 agent memory notes under
+`~/.claude/projects/<slug>/memory` are checked when present — they matter most,
+because they are auto-loaded into every session and arrive as background truth
+without anyone asking. But **CI cannot see them**, so a green pipeline says
+nothing about memory. Run this locally before committing.
 
 ### Rules
 

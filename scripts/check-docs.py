@@ -11,7 +11,7 @@ commit after the index was written. A rule nothing checks is a rule that decays.
 Four checks, each covering a failure mode this repo actually had:
 
   1. REFUTED-LEAK   a claim listed as dead in INDEX section 6 reappears in a doc
-                    with no correction marker near it
+                    -- or an agent memory note -- with no correction marker near it
   2. VERIFY-ROT     a `verify` command attached to an INDEX fact no longer finds
                     anything -- the fact has drifted from the code
   3. DEAD-LINK      an INDEX link points at a file that does not exist
@@ -20,7 +20,15 @@ Four checks, each covering a failure mode this repo actually had:
 
 Exit 1 on any failure in checks 1-3. Check 4 warns, because it cannot know
 whether the change was relevant.
+
+Scope note: agent memory notes live outside the repo, under
+~/.claude/projects/<slug>/memory. They are covered when present, because they are
+auto-loaded into every session's context and a stale claim there arrives as
+background truth without anyone asking for it. **CI cannot see them**, so memory
+coverage is local-only -- run this before committing, not just in the pipeline.
+Point ANKERCTL_MEMORY_DIR at another directory to override.
 """
+import os
 import pathlib
 import re
 import subprocess
@@ -28,6 +36,23 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INDEX = ROOT / "documentation" / "INDEX.md"
+
+
+def memory_dir():
+    """Locate this project's agent memory, without hardcoding a personal path.
+
+    Claude Code stores it at ~/.claude/projects/<abs-repo-path with / as ->/memory.
+    Derived, never written down: the literal path contains a home directory and
+    committing it would trip the secret sweep. Returns None when absent -- CI has
+    no memory directory, and that is not a failure.
+    """
+    override = os.environ.get("ANKERCTL_MEMORY_DIR")
+    if override:
+        path = pathlib.Path(override)
+        return path if path.is_dir() else None
+    slug = str(ROOT).replace("/", "-")
+    path = pathlib.Path.home() / ".claude" / "projects" / slug / "memory"
+    return path if path.is_dir() else None
 
 # Phrases that were refuted. If one appears without a correction marker nearby,
 # it is poisoning whatever reads it. Keep in sync with INDEX section 6.
@@ -63,6 +88,20 @@ def _docs():
         if path.name in SKIP_FILES:
             continue
         yield path
+    # Agent memory notes are auto-loaded into every session's context without
+    # being asked for, so a refuted claim there is worse than one in a doc: it
+    # arrives as background truth. Same rules apply.
+    mem = memory_dir()
+    if mem:
+        yield from sorted(mem.glob("*.md"))
+
+
+def _label(path):
+    """Repo-relative where possible; memory notes are outside the repo."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return f"memory/{path.name}"
 
 
 def check_refuted_leaks():
@@ -77,7 +116,7 @@ def check_refuted_leaks():
                 if MARKERS.search(window):
                     continue
                 failures.append(
-                    f"{path.relative_to(ROOT)}:{i + 1}: refuted claim "
+                    f"{_label(path)}:{i + 1}: refuted claim "
                     f"{phrase!r} with no correction nearby ({why})"
                 )
     return failures
