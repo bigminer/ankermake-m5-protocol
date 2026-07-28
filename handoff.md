@@ -309,24 +309,55 @@ gates the *legacy* pre-print routine on it; `printer_actions.py:512` calls
 bed temperature, with no such check. Setting the variable false changes nothing
 about what `print_start` sends.
 
-`G36` is listed under **Known-dangerous — do not send** in the findings ledger
-("wedges the command queue, needs a power cycle") and `scripts/printer-probe.py`
-refuses it outright. **Do not run issue #18 until this is resolved.** See finding
-D1 in [`documentation/audit-2026-07-27.md`](documentation/audit-2026-07-27.md).
+`G36` has never produced leveling motion or a completion `ok` across three
+supervised sessions, so `prepare_bed` waits for something that never arrives and
+preparation times out. The ledger's older "wedges the command queue, needs a
+power cycle" wording is **contested** — one early experiment recorded it, the two
+supervised 2026-07-09 sessions did not reproduce it.
+
+**`G36` also appears to be the wrong command.** The OrcaSlicer Anker M5C profile,
+behind every successful print, starts `M4899 T3` → `M104 S150` → `M190` → `M109`
+→ **`G28 ;Home`**. Our preparation matches the first three steps and substitutes
+`G36` for `G28`. The working flow never sends `G36`, and `M4899` is a real Anker
+opcode we never send at all.
+
+**Tracked as [#25](https://github.com/bigminer/ankermake-m5-protocol/issues/25);
+do not run #18 until it is resolved.** See finding D1 in
+[`documentation/audit-2026-07-27.md`](documentation/audit-2026-07-27.md).
 
 ### Next implementation work
 
-Dependency edges verified 2026-07-26:
+**Re-planned 2026-07-28 after the audit.** The three issues below are new, need
+no printer, and should come before any further validation. Everything learned in
+the last two days came from reading published source; the live test run in the
+same period answered a question one grep answers.
 
-- **#12 (bounded jog) — unblocked but not ready to implement.** `FACT_PATHS` in
-  `web/printer_snapshot.py` has no position facts, and position is poll-only
-  (`M114`) — the same class of problem as `state`, except motion is where this
-  printer has twice driven its nozzle into the plate. There is nothing for a jog
-  action to confirm against, so the contract needs designing before any
-  implementation begins.
-- #13 is blocked by #12. #19 is blocked by #9, #15, and #16.
-- #9, #16, #17, and #18 are `ready-for-human`: they need the operator at the
-  printer and the validation setup described above.
+| Issue | Why it is first |
+| --- | --- |
+| [#27](https://github.com/bigminer/ankermake-m5-protocol/issues/27) — homing from firmware source | Oldest problem, the one with physical consequences, and the standing "arming lives in the comm module" explanation now has firmware evidence against it. Read-only. **An outcome of "omit Home permanently" is welcome.** |
+| [#26](https://github.com/bigminer/ankermake-m5-protocol/issues/26) — map the control layer to source | Re-grounds the ledger. Its firmware section read two of three config files, so any row may be wrong |
+| [#25](https://github.com/bigminer/ankermake-m5-protocol/issues/25) — fix the ungated `G36` | Blocks #18. Offline |
+
+Status of the rest:
+
+- **#12 (bounded jog) — now `needs-triage`, not `ready-for-agent`.** It read as
+  actionable because its only listed blocker (#8) is closed, while the real
+  blocker sat only in this file. `FACT_PATHS` has no position fact; `M114`
+  reports planner space, so nothing can confirm physical motion; and
+  `NO_MOTION_BEFORE_HOMING` means X/Y refuse to move at all until homed. The
+  contract needs designing first.
+- **#13 — now `needs-triage`** too: blocked by #12, and its live-Z effects are
+  invisible to `M114` by design, so every outcome falls in the unobservable
+  branch.
+- **#6 user story 7 needs revision** — it promises confirmation backed by
+  physical behaviour, which is achievable for thermal, impossible for jog and
+  live Z, and unknown for fan.
+- **#15** — the three thermal contracts are still one operator env-var line from
+  closing. The fan half is reopened pending the 1005 question.
+- **#17 has two criteria that cannot pass** as written; revise them with #12/#13
+  rather than discovering it mid-run.
+- #19 is blocked by #9, #15, #16, #17, #18. #9 and #16 remain `ready-for-human`
+  and still need the operator and the validation setup described above.
 
 ## Mandatory safety rules
 
