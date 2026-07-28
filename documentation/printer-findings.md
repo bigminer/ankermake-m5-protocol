@@ -309,6 +309,43 @@ G28
 | The two paths differ in probe mode: `Probe_homeaxis(Z_AXIS,2)` deferred vs `(Z_AXIS,1)` inside G36 | `G28.cpp:198`, `:285` | `CONFIRMED` |
 | **Why the probe registers at print temperature and not cold** | — | **`UNVERIFIED` — the open question.** Candidates: the detached-nozzle strain board (`ADAPT_DETACHED_NOZZLE 1`, `anker_nozzle_board.cpp`), `ANKER_PROBE_SET`, and `Probe_homeaxis` in `motion.cpp` |
 
+### What the probe actually is (2026-07-28)
+
+The ledger has been reasoning about the probe as an endstop pin, because `M119`
+reports `z_probe: open`. **It is not a pin.** It is a strain gauge on a separate
+nozzle board, read through a load-cell ADC and spoken to over UART.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| Probing is armed per-descent by two calls, immediately before the move | `motion.cpp:2613-2614` — `uart_nozzle_tx_point_type(POINT_G28, 1)` and `anker_probe_set.probe_start(anker_probe_set.leveing_value)` | `CONFIRMED` |
+| The sensor is a **strain gauge on a detached nozzle board** — `ADAPT_DETACHED_NOZZLE 1` — not a switch on a pin | `ANKER_Config.h:67`; the UART nozzle protocol in `feature/interactive/` | `CONFIRMED` |
+| It is read via a **CS1237** 24-bit load-cell ADC, with an init/tare value and a threshold | `anker_z_offset.cpp` (`cs1237_*`, `init_value`, `threshold`) | `CONFIRMED` |
+| Two thresholds exist: `HOMING_PROBE_VALUE 650` and `LEVEING_PROBE_VALUE 600` | `anker_z_offset.h:58-59` | `CONFIRMED` |
+| **`Probe_homeaxis` arms with `leveing_value` (600), not `homing_value` (650)** — even when homing | `motion.cpp:2614` | `CONFIRMED`; whether deliberate `UNVERIFIED` |
+| Thresholds are **runtime-settable** — `M3020 V<n>` pushes a new value to the nozzle board | `feature/interactive/M3011_3100.cpp` | `CONFIRMED` |
+| On no-detect the descent runs **`1.5 × max_length(Z)`** and then *sets the axis as homed anyway* | `motion.cpp:2609`, `:2616-2625` | `CONFIRMED` |
+
+**This retires an old confusion.** `M119`'s `z_probe: open` was already marked
+`INVALID-TEST` on StallGuard grounds. The deeper reason is that **the probe is not
+on that pin at all** — a pin read can never say anything about a UART strain gauge.
+
+**The heater save/restore in `Anker_Zoffset::run()` is dead code** here —
+`ANKER_Z_OFFSET_FUNC` is `0` (`ANKER_Config.h:64`). Do not cite it.
+
+### Still unanswered: the temperature discriminator
+
+**No temperature term appears anywhere in the probe-arming or probe-sensing path
+read so far.** The `>= EXTRUDE_MINTEMP` check exists only in
+`anker_home_z_safely()`'s G36 branch (`G28.cpp:263`) and does not guard the
+deferred descent that actually moves.
+
+So *why a hot print homes and a cold standalone command plunges is still
+`UNVERIFIED`.* It may not be temperature at all. The untested candidate now is
+**nozzle-board state**: `probe_start` and `uart_nozzle_tx_point_type` assume a
+board that is initialised and tared, and `src/feature/anker/handshake.cpp` exists
+and has not been read. A board that never handshook would accept the arm command
+and simply never report a trigger — which is exactly the observed behaviour.
+
 ### 🚫 What this does not license
 
 **Nothing here justifies sending a homing command**, and the trace makes the case
