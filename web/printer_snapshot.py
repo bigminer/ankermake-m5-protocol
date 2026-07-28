@@ -27,6 +27,11 @@ FACT_PATHS = (
     "print.layer.current",
     "print.layer.total",
     "speed",
+    # Fan speed, percent, from commandType 1005.  ⚠️ The printer publishes this
+    # on *change* only, so the fact reads "stale" for most of a print while
+    # remaining accurate -- the same shape of problem as `state`.  Do not gate an
+    # action on `fan` freshness without reading documentation/INDEX.md F-003.
+    "fan",
 )
 
 

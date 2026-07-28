@@ -61,6 +61,12 @@ def normalize(obj):
         t = _temp(obj)
         if t:
             out["bed"] = t
+    elif ct == 1005:  # fan speed, percent
+        # ZZ_MQTT_CMD_FAN_SPEED (0x3ed).  Published on *change* only, not on a
+        # cadence -- observed live at 99 mid-print and 0 at completion, twice in
+        # a 25-minute run.  See documentation/captures/.
+        if "value" in obj:
+            out["fan"] = obj["value"]
     elif ct == 1006:  # print speed
         if "value" in obj:
             out["speed"] = obj["value"]

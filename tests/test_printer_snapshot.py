@@ -142,3 +142,17 @@ def test_matching_print_telemetry_binds_and_refreshes_trusted_upload_identity():
     still_fresh = next(snapshots.watch(Watch("printer-0")))
     assert still_fresh.facts["print.name"].freshness == "fresh"
     assert still_fresh.facts["print.user_name"].freshness == "fresh"
+
+
+def test_fan_speed_becomes_a_tracked_fact():
+    # 1005 is the printer's only fan report and it is published on change only,
+    # so the snapshot is the thing that has to remember it between changes.
+    snapshots = PrinterSnapshots(clock=FakeClock())
+    watcher = snapshots.watch(Watch(printer_id="printer-0"))
+    next(watcher)
+
+    snapshots.observe("printer-0", {"fan": 99})
+    assert next(watcher).facts["fan"].value == 99
+
+    snapshots.observe("printer-0", {"fan": 0})
+    assert next(watcher).facts["fan"].value == 0

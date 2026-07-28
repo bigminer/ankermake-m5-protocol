@@ -47,6 +47,18 @@ class NormalizeTests(unittest.TestCase):
     def test_speed(self):
         self.assertEqual(normalize({"commandType": 1006, "value": 100}), {"speed": 100})
 
+    def test_fan(self):
+        # 1005 is ZZ_MQTT_CMD_FAN_SPEED (0x3ed), percent.  Observed live at 99
+        # mid-print and 0 at completion; see documentation/captures/.
+        self.assertEqual(normalize({"commandType": 1005, "value": 99}), {"fan": 99})
+
+    def test_fan_off_is_not_dropped(self):
+        # 0 is a real reading, not "absent" -- a falsy value must still normalize.
+        self.assertEqual(normalize({"commandType": 1005, "value": 0}), {"fan": 0})
+
+    def test_fan_without_a_value_normalizes_empty(self):
+        self.assertEqual(normalize({"commandType": 1005}), {})
+
     def test_layer(self):
         self.assertEqual(normalize({"commandType": 1052, "real_print_layer": 3, "total_layer": 20}),
                          {"print": {"layer": {"current": 3, "total": 20}}})

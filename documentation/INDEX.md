@@ -70,7 +70,8 @@ new claims (A-05).
 | F-004 | **`1026` is emitted after homing** (twice, both post-`G28`). Bidirectional: as a *command* `value 2` drove the nozzle into the plate. Obs `CONFIRMED`; semantics `UNVERIFIED` | `grep '"commandType":1026' documentation/captures/*.jsonl` |
 | F-005 | States: `0` idle · `1` printing · `4` **finished or stopped** · `8` preparing (~123s). Obs `CONFIRMED` | `grep '"commandType":1000' documentation/captures/*.jsonl \| grep -oE '"value":[0-9]+' \| uniq -c` |
 | F-006 | **Zero `1043` in a full print.** The module publishes status only; its Marlin serial link is invisible over MQTT. Obs `CONFIRMED` | `grep -c '"commandType":1043' documentation/captures/*.jsonl` → 0 |
-| F-007 | `normalize()` maps only `1000/1001/1003/1004/1006/1052`. **Unnamed types can never become facts.** No `1005` branch | `grep -n 'ct ==' web/service/state.py` |
+| F-007 | `normalize()` maps `1000/1001/1003/1004/**1005**/1006/1052`. **Unnamed types can never become facts** — check here before concluding the printer does not report something. `1005`→`fan` wired 2026-07-28 | `grep -n 'ct ==' web/service/state.py` |
+| F-008 | **`fan` is a tracked fact** in `FACT_PATHS`. ⚠️ Published on change only, so it reads `stale` for most of a print while staying accurate — same shape as `state`. **Do not gate an action on `fan` freshness** without reading F-003 | `grep -n 'fan' web/printer_snapshot.py` |
 
 ### Homing
 
@@ -90,7 +91,7 @@ new claims (A-05).
 | --- | --- | --- |
 | F-020 | **`M114` cannot prove motion.** `M114_DETAIL`/`_REALTIME`/`_LEGACY` compiled out; `Count X:` is `planner.position`. Proves acceptance, refusal, and with `M400` queue completion | [`jog-confirmation-research.md`](jog-confirmation-research.md) |
 | F-021 | Jog is confirmable only to "accepted, queued, drained". `FACT_PATHS` has no position entry | `grep -A20 FACT_PATHS web/printer_snapshot.py` |
-| F-022 | **Fan is confirmable in principle (F-003), not as implemented** — we send raw `M106`, and `REPORT_FAN_CHANGE` is compiled out so the MCU never tells the module | `grep -n 'M106' web/printer_actions.py` |
+| F-022 | **Fan is confirmable in principle (F-003), still not as implemented.** The fact is now wired (F-007/F-008), but we send raw `M106` and `REPORT_FAN_CHANGE` is compiled out, so the MCU never tells the module and `1005` never fires for our own commands. **Remaining work: send native `FAN_SPEED` (`0x3ed`) instead of `M106`** — then the module updates, publishes 1005, and the action confirms | `grep -n 'M106' web/printer_actions.py` |
 
 ## 5. Settled — do not re-derive
 
@@ -135,8 +136,12 @@ Ordered by what actually unblocks the goal:
 
 1. **#25 — ungated `G36` in `print_start`.** Offline, blocks #18. Cheapest real
    unblock.
-2. **Wire `1005`; switch `fan_setting` to the native opcode.** Makes one action
-   genuinely confirmable and closes the fan half of #15. Directly enabled by F-003.
+2. **~~Wire `1005`~~ (done 2026-07-28); switch `fan_setting` to the native
+   `FAN_SPEED` opcode.** The fact now exists (F-007/F-008) but nothing confirms
+   against it yet, because raw `M106` never reaches the module's bookkeeping.
+   Sending `0x3ed` is the remaining half — **its payload is unknown and must not
+   be guessed** (A-04); capture the official app driving the fan. Closes the fan
+   half of #15.
 3. **#26 — map the control layer to Tier 1.** The ledger's firmware section read
    2 of 3 config files (A-01), so any row may be wrong.
 4. **#12 — jog contract.** Needs design, not implementation. F-020 bounds what it
