@@ -1,9 +1,13 @@
 # Printer Findings Ledger
 
-**Read this before any printer work.** It is the canonical record of what we know
-about this M5C, how we learned it, and — critically — **how much to trust each
-claim**. Append to it as findings land. Never delete a refuted entry; mark it
-`REFUTED` and say why. A wrong belief we can see is safer than one we re-derive.
+> **Start at [`INDEX.md`](INDEX.md), not here.** It carries the settled facts,
+> the refuted ones, and the open questions in a form you can scan. Come here for
+> the detail behind an index entry, or to append a new finding.
+
+This is the canonical record of what we know about this M5C, how we learned it,
+and — critically — **how much to trust each claim**. Append to it as findings
+land. Never delete a refuted entry; mark it `REFUTED` and say why. A wrong belief
+we can see is safer than one we re-derive.
 
 ## Status legend
 

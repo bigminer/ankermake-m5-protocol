@@ -1,8 +1,12 @@
 # Method — goal, sources, guardrails
 
-**Read this before `printer-findings.md`.** The ledger records *what* we believe
-and how much. This records *what counts as a reason to believe it.* When the two
-conflict, this document sets the rule and the ledger entry gets re-graded.
+> **Start at [`INDEX.md`](INDEX.md), not here.** It summarises this document in
+> one table and points at the rest. Come here for the full hierarchy and the
+> conflict-resolution rules.
+
+The ledger records *what* we believe and how much. This records *what counts as a
+reason to believe it.* When the two conflict, this document sets the rule and the
+ledger entry gets re-graded.
 
 Written 2026-07-27, after an audit found that this project's own derived
 artifacts were being cited as evidence about the printer. See

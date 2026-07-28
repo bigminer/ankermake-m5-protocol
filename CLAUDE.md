@@ -2,9 +2,17 @@
 
 ## Before diagnosing the printer
 
-- **Read [`documentation/printer-findings.md`](documentation/printer-findings.md) first**
-  — it records what we know, what failed, and which conclusions were retracted.
-  Append what you learn, with a status. Don't delete refuted entries.
+- **Read [`documentation/INDEX.md`](documentation/INDEX.md) first.** It is the
+  front door: settled facts, refuted claims, open questions, and where the
+  evidence lives. It exists because sessions repeatedly re-derived known results
+  and resurrected dead ones.
+
+  Behind it: [`documentation/method.md`](documentation/method.md) for what counts
+  as evidence — **this repo's own specs and generated tables are not evidence
+  about the printer** — and
+  [`documentation/printer-findings.md`](documentation/printer-findings.md) for the
+  detailed ledger. Append what you learn, with a status. Don't delete refuted
+  entries.
 
 - **If the printer seems dead, locate the silent layer before restarting
   anything.** Check `/opt/ankerm5c/logs/mosquitto.out.log` first; `ankerctl`'s
