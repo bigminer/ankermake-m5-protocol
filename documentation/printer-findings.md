@@ -245,7 +245,7 @@ else
 | `EXTRUDE_MINTEMP` is **160C** | `Configuration.h:719` | `CONFIRMED` |
 | `g36_running_flag` is set `true` in **exactly one place** — `auto_align()`, i.e. **`G36`** | `anker_align.cpp:96`; cleared `:130`, `:175`, and in `anker_pause.cpp` | `CONFIRMED` |
 | **`G36` calls `G28` itself** — it is the entry point for homing, not a separate leveling command | `anker_align.cpp:100` | `CONFIRMED` |
-| **Therefore a standalone `G28` can never home Z.** It takes the `else` branch and only marks `is_home_z=true` | follows from the above | `CONFIRMED` |
+| ~~**Therefore a standalone `G28` can never home Z.** It takes the `else` branch and only marks `is_home_z=true`~~ | ~~follows from the above~~ | **`REFUTED` same day — see the descent trace below.** The `else` branch *defers* homing, it does not skip it |
 | A failed alignment (`ABS(z1-z2)` over range, or overpressure) calls **`kill()`** — a hard halt needing a reset | `anker_align.cpp:122-131` | `CONFIRMED` |
 | Z homes at **`"G1 X2 Y-23 F12000"`**, off the bed — not bed centre | `ANKER_Z_HOMING_SCRIPT`, `pins_ANKER_V8110_V0_4.h` | `CONFIRMED` |
 
@@ -282,13 +282,43 @@ That entry says *"probing is NOT temperature-gated"* on the strength of
 feature and false of this machine** — the Anker path carries its own threshold at
 `G28.cpp:263`. `REFUTED`. Right about the flag, wrong about the machine.
 
+### The descent, traced (2026-07-28)
+
+**Correcting the row above: the `else` branch defers Z homing, it does not skip
+it.** The motion happens a few steps later, in a path with no guards at all.
+
+```
+G28
+ └─ anker_home_z_safely()                              G28.cpp:594
+     └─ else branch → is_home_z = true, no motion here       :295
+ └─ anker_z_homing_options = true                            :595
+ └─ after_homing_action()                                    :711
+     └─ is_center_home() → true               anker_homing.cpp:173
+     └─ process_subcommands "G2001"                          :220
+         └─ G2001 → home_z_safely()                   G28.cpp:766
+             └─ if (is_home_z) homeaxis(Z_AXIS)   ←── THE DESCENT :185
+             └─ Probe_homeaxis(Z_AXIS, 2)                     :198
+```
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| The plate-strike descent is `homeaxis(Z_AXIS)` inside `home_z_safely()`, reached via `G2001` | trace above | `CONFIRMED` |
+| That path checks **neither** nozzle temperature **nor** `g36_running_flag` | `G28.cpp:174-194` | `CONFIRMED` |
+| **A normal slicer print takes the same path.** Its `G28` runs hot but with `g36_running_flag` false, so it also goes `else` → `G2001` → `homeaxis(Z_AXIS)` | `G28.cpp:263`, slicer start G-code | `CONFIRMED` |
+| **Therefore the code path is not the discriminator** between a successful home and a plate strike | follows | `CONFIRMED` |
+| The two paths differ in probe mode: `Probe_homeaxis(Z_AXIS,2)` deferred vs `(Z_AXIS,1)` inside G36 | `G28.cpp:198`, `:285` | `CONFIRMED` |
+| **Why the probe registers at print temperature and not cold** | — | **`UNVERIFIED` — the open question.** Candidates: the detached-nozzle strain board (`ADAPT_DETACHED_NOZZLE 1`, `anker_nozzle_board.cpp`), `ANKER_PROBE_SET`, and `Probe_homeaxis` in `motion.cpp` |
+
 ### 🚫 What this does not license
 
-**Nothing here justifies sending a homing command.** The physically important
-unknown is untouched: the `else` branch performs no Z motion, so **what actually
-drove the nozzle into the plate is still `UNVERIFIED`.** Leading candidate:
-`is_home_z=true` establishes a false datum and a later move works from it. Needs
-the rest of `G28.cpp` traced.
+**Nothing here justifies sending a homing command**, and the trace makes the case
+stronger, not weaker:
+
+- **The `/ws/ctrl` block on `G28` with Z must stay.** "Standalone `G28` does
+  nothing" was wrong — it descends.
+- **A hot nozzle is not a safety argument.** The threshold at `G28.cpp:263` gates
+  only the G36 branch; the deferred path that actually descends has no
+  temperature check.
 
 Knowing the threshold does **not** make "heat to 160C and send `G36`" safe — a
 failed alignment `kill()`s the printer, and the descent mechanism is unexplained.
