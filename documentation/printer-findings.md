@@ -69,7 +69,7 @@ in Retracted claims.
 | --- | --- |
 | `G28` (bare), `G28 Z`, any `G28` with Z | Drives nozzle into plate. Blocked at `/ws/ctrl`. |
 | `MOVE_ZERO` (1026 / `0x0402`) | Same. Blocked at `/ws/ctrl`. |
-| `G36` | ACKs, no motion, **wedges the command queue**, needs a power cycle. |
+| `G36` | ACKs, **never produces leveling motion, never returns a completion `ok`** — three sessions agree. Whether it also *wedges the queue and needs a power cycle* is **contested**: recorded in one early experiment, **not reproduced** in the two supervised 2026-07-09 sessions, which saw `Idle / Ready to Print` and a working heater cooldown. Not the command the working print flow uses — the slicer's start G-code homes with **`G28`**. |
 | `RECOVER_FACTORY` (1029 / `0x0405`) | Factory reset. Destroys printer config. |
 | `M402` | Untested. Presumed inverse of `M401` — may **lower** Z ~15mm. |
 
@@ -250,7 +250,57 @@ homing/alignment state, so a raw homing opcode is not a complete
 probe-preparation sequence. Do not re-enable Home from another command or value
 guess.
 
+### 🔑 A third config file exists, and it changes the homing picture (2026-07-28)
+
+**`release_marlin2.0/Marlin/src/inc/ANKER_Config.h`.** Every firmware fact below
+was read from `Configuration.h` and `Configuration_adv.h` only. This third header
+holds the Anker feature switches, and several conclusions rested on flags it
+defines.
+
+Read directly (fetched and grepped, not via a search tool — see the caveat at the
+end of this section).
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| **`USE_Z_SENSORLESS` IS defined** — `#define USE_Z_SENSORLESS 1` | `ANKER_Config.h:69` | `CONFIRMED` |
+| Therefore the `ANKER_PROBE_TIMEOUT` / `ANTHER_Z_DROP_DISTANCE -14` / `ANTHER_Z_RISE_DISTANCE 2` block is **live code, not dead code** | it is gated on `USE_Z_SENSORLESS` | **`REFUTED`** the earlier "may be dead code" row |
+| The M5C uses a **custom Z-homing path**, not stock Marlin's | `WS1_HOMING_5X 1`, `EVT_HOMING_5X 1`; `G28.cpp:584-596` takes `anker_home_z_safely()` + `ANKER_Z_HOMING_SCRIPT` instead of `home_z_safely()` | `CONFIRMED` |
+| Z homing **retries on failure and then kills** | `anker_homing.cpp:224-234` — `is_again_probe_homing` re-runs `G28 Z` up to `ANKER_Z_AGAIN_HOMING_NUM`, then `kill(MSG_KILL_HOMING_FAILED)` | `CONFIRMED` (live, given `USE_Z_SENSORLESS`) |
+| **Overpressure reporting is OFF** — the feature that would "stop the down-probing function and report an error" | `ANKER_Config.h:79` `ANKER_OVERPRESSURE_REPORT 0` | `CONFIRMED` |
+| `NO_MOTION_BEFORE_HOMING` is **enabled** | `Configuration.h:1368` | `CONFIRMED` |
+| Therefore the `echo:Home X` / `echo:Home Y` refusals on every unhomed X/Y jog are **this feature**, not an Anker quirk | follows directly | root cause **`CONFIRMED`**, upgraded from `UNVERIFIED` |
+| Other switches worth knowing: `ANKER_MAKE_API 1`, `ANKER_ANLIGN 1`, `ANKER_LEVEING 1`, `ANKER_PROBE_SET 1`, `ANKER_NOZZLE_PROBE_OFFSET 1`, `ANKER_SIMPLE_HOMING 1`, `NO_CHECK_Z_HOMING 1`, `ANKER_M_CMDBUF 1`. Disabled: `ANKER_Z_OFFSET_FUNC 0`, `ANKER_BELT_CHECK 0` | `ANKER_Config.h:51-84` | `CONFIRMED` |
+
+**Probing is NOT temperature-gated.** `//#define PREHEAT_BEFORE_PROBING` is
+commented out (`Configuration.h:1311`), so `PROBING_NOZZLE_TEMP 140` on line 1313
+is inside a disabled `#if` and never applies. `REFUTED`: the idea that standalone
+`G28` fails because the nozzle is cold, and that a hot nozzle would make it home.
+**Do not run a heated standalone homing test on that reasoning** — it would drive
+a hot nozzle at the plate on a premise the source contradicts.
+
+⚠️ **`ANKER_OVERPRESSURE_REPORT 0` deserves attention** given two plate strikes.
+The switch that would halt down-probing and raise an error on overpressure is off
+in this build. That is a candidate explanation for why the nozzle kept pressing
+rather than aborting. `UNVERIFIED` as a causal claim — nobody has read what the
+flag actually guards.
+
+⚠️ **Version skew, and it bounds everything in this section.** `ANKER_Config.h:49`
+sets `SHORT_BUILD_VERSION "V8110_V3.0.21"`. **Our printer runs V3.1.56.** The
+published source is an *older* build than the machine. Treat firmware facts as
+strong evidence about intent and structure, not as guaranteed byte-truth for the
+installed firmware.
+
+⚠️ **Method note that nearly cost us this.** `gh search code` showed
+`#define PROBING_NOZZLE_TEMP 140` looking live; a page-summarising fetch said it
+was commented. Both were misleading — the line is uncommented but sits inside a
+disabled `#if ENABLED(...)`. **For any config flag, fetch the file and read the
+enclosing block.** A matching line is not an answer. This is the same trap that
+produced the `USE_Z_SENSORLESS` error corrected above.
+
 ### Firmware facts (read from source, V8110_DVT `Configuration.h` / `_adv.h`)
+
+⚠️ **This section read only two of the three config files.** See the
+`ANKER_Config.h` entry above; at least one row below was wrong as a result.
 
 Source: `github.com/eufymake/eufyMake-Marlin-M5C`, path
 `release_marlin2.0/Marlin/Configuration/V8110/V8110_DVT/`. **V8110 is the M5C.**
@@ -266,7 +316,7 @@ Source: `github.com/eufymake/eufyMake-Marlin-M5C`, path
 | Sensorless *probing* is off | `//#define SENSORLESS_PROBING` | `CONFIRMED` |
 | Z homing uses the probe, on a dedicated pin | `#define USE_PROBE_FOR_Z_HOMING`; `//#define Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN` | `CONFIRMED` |
 | `ANKER_PROBE_TIMEOUT 12000` / `ANTHER_Z_DROP_DISTANCE -14` / `ANTHER_Z_RISE_DISTANCE 2` exist | `Configuration_adv.h:2993+` | `CONFIRMED` |
-| …but that block sits inside `#if ENABLED(USE_Z_SENSORLESS)` and **`USE_Z_SENSORLESS` is not defined in either config file** — may be dead code | grep of both headers | `UNVERIFIED` — ⚠️ **settleable without the printer** (audit B3): `src/feature/anker/anker_z_sensorless.cpp` is published and was never opened |
+| ~~…but that block sits inside `#if ENABLED(USE_Z_SENSORLESS)` and **`USE_Z_SENSORLESS` is not defined in either config file** — may be dead code~~ | ~~grep of both headers~~ | **`REFUTED` 2026-07-28** — `USE_Z_SENSORLESS` **is** defined, `ANKER_Config.h:69`. The grep covered two of three config files. The block is live code. |
 
 ### The XY-is-fiction hypothesis (operator's insight, 2026-07-15)
 

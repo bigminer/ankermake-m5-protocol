@@ -28,8 +28,13 @@ printer can keep working with its cloud connection severed.
   slicers require a dedicated API key, as does the web UI when configured
 - 📷 **External webcam support** — embed any MJPEG/WebRTC stream in the
   dashboard, giving the camera-less M5C a live view
-- 📐 **Pre-print auto-leveling** — optionally preheat and run the printer's
-  G36 auto-align routine before every slicer-uploaded print
+- 📐 **Pre-print preheat hook** *(experimental, disabled, and it does not
+  level)* — `ANKERCTL_PREPRINT_G36` preheats and then sends `G36`. **Production
+  firmware has never honoured `G36`**: it acknowledges the command, performs no
+  leveling motion, and never returns a completion `ok`, across three supervised
+  sessions. The flag must stay `false`. Your slicer's start G-code already homes
+  and levels — that is the path that works. See
+  [`documentation/printer-findings.md`](documentation/printer-findings.md)
 - 🩺 **Hardening** — file transfers time out instead of hanging forever,
   failures reach the slicer instead of being logged and forgotten, secrets are
   stored owner-only, plus a test suite and working CI

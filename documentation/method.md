@@ -61,6 +61,23 @@ Authoritative about intended behaviour. **Check the build config actually used**
 a feature present in Marlin may be compiled out for V8110_DVT, which is exactly
 the fan case.
 
+Three rules learned the hard way on 2026-07-28, all of which produced wrong
+conclusions first:
+
+- **There are THREE config files, not two.** `Configuration.h`,
+  `Configuration_adv.h`, **and `src/inc/ANKER_Config.h`**, which holds the Anker
+  feature switches. The ledger's firmware section read the first two and
+  concluded `USE_Z_SENSORLESS` was undefined and its block dead. It is defined,
+  in the third file, and the block is live.
+- **Read the enclosing block, never the matching line.** `PROBING_NOZZLE_TEMP
+  140` is uncommented — inside `#if ENABLED(PREHEAT_BEFORE_PROBING)`, which is
+  off. A code-search hit showed it live; a page summariser said it was commented;
+  both were misleading. **Fetch the file and read around the line.**
+- **Mind the version skew.** `ANKER_Config.h` declares
+  `SHORT_BUILD_VERSION "V8110_V3.0.21"` while our printer runs **V3.1.56**. The
+  published source is older than the installed firmware. Tier 1 is strong
+  evidence about intent and structure, not guaranteed byte-truth for the machine.
+
 ### Tier 2 — community reverse-engineering
 
 `Ankermgmt/ankermake-m5-research`, `sondregronas/ankermake-hass-component`, the
