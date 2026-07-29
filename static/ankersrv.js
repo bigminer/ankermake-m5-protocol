@@ -1234,6 +1234,10 @@ $(function () {
         if (!confirmAttendedAction(`Apply a live Z adjustment of ${amount.toFixed(2)} mm? Stay at the printer.`)) {
             return false;
         }
+        // M290 is Z-only here (BABYSTEP_XY is off), the firmware clamps each
+        // call to +/-2mm, and BABYSTEP_ZPROBE_OFFSET is enabled so this also
+        // shifts probe.offset.z -- what M851 reports -- until power-cycle.
+        // Not written to EEPROM.  See documentation/INDEX.md F-037.
         sendGcode(`M290 Z${amount.toFixed(2)}`);
         return false;
     });

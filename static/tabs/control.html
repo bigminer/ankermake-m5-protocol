@@ -220,7 +220,10 @@
                 <div class="card-header">Live Z Adjust</div>
                 <div class="card-body">
                     <p class="small text-body-secondary mb-3">
-                        Fine adjustment while idle. This is not saved as printer calibration.
+                        Fine adjustment while idle. Each step also shifts the live probe
+                        offset the printer reports for <code>M851</code>, and that shift
+                        lasts until the printer is power-cycled. It is not written to
+                        EEPROM.
                     </p>
                     <div class="row g-2 align-items-end">
                         <div class="col-5">

@@ -28,6 +28,13 @@ If your next move appears here, the answer already exists. Do not derive it.
 | send an opcode we have never sent | Its payload is unknown and **there is no convention to infer from** — 4 shapes across 3 opcodes | §5 |
 | conclude `print_start` sends `G36` ungated | **It does not.** `ANKERCTL_PREPRINT_G36` gates it via `extract_temperatures` at `web/__init__.py:776` — no temps, no `bed_celsius`, no preparation. An audit got this wrong by reading `printer_actions.py` alone | A-09, issue #25 |
 | conclude anything from `M105` about the fan | No fan field, and `REPORT_FAN_CHANGE` is compiled out | F-022 |
+| treat an `ok` as proof a command ran | **Depends entirely on the command.** Marlin sorts module traffic into four classes before dispatch; `G1` acks at enqueue, `M106` acks *before* execution by design | F-030, F-031 |
+| look for `M2024` in the G-code dispatcher | **It is not there.** `M2024` is intercepted in the queue parser; no dispatcher case exists | F-032 |
+| grep `eufyMake-linux-sdk` with `gh search code` | **That repo is not indexed** — every query returns zero, including controls. Enumerate the git tree instead | §3 A-10 |
+| look for an opcode payload in the Linux SDK | **It is not there.** The SDK is BSP only; the Anker application is unpublished. Capture the app | F-033 |
+| assume the `G28` plate-strike branch is abnormal | **It is the normal path.** A real print fails the `:263` probe gate too; only `is_clean` differs | F-034 |
+| worry that `G28 X Y` might descend Z | **It cannot.** `anker_z_homing_options` is reset every `G28` and set only under `doZ` | F-035 |
+| wonder what the working flow sends that we do not | `M4899 T3` (S-curve + new lin-adv), `M900 K`, `M205` — injected after `G28` by the slicer's post-processor | F-036 |
 
 ## 2. Evidence rule
 
@@ -55,6 +62,10 @@ Firmware is strong evidence of intent, not byte-truth. Full rules:
 | A-07 | Searched only the Marlin repo, concluded a component was unpublished | Missed `eufyMake-linux-sdk`, `anker_gcode/`, `feature/anker/` |
 | A-08 | Kept the scarier of two conflicting observations without reconciling | `G36` "wedges the queue" — one run said so, two later did not |
 | A-09 | Concluded a gate was missing from one file's absence, without asking who fills the field it branches on | "`print_start` sends `G36` ungated" — wrong; the gate is one layer up, and a passing test already proved it |
+| A-10 | Read a zero-result search as absence without running a control query | `gh search code` **does not index `eufyMake-linux-sdk`** — every term returns nothing, including `Makefile`. Would have "proved" the MQTT layer absent by tool artifact. Enumerate the tree; always run a control |
+| A-11 | Read only the G-code dispatcher when asking what a command does | `M2024` has no dispatcher case at all — it is intercepted upstream in `queue.cpp`. The dispatcher is the *last* place module traffic is handled, not the first |
+| A-12 | Treated presence in a build *catalogue* as evidence the thing is built | "Ships `paho-mqtt-*`, so the upper computer speaks MQTT through paho" — wrong. Upstream buildroot carries ~2,350 recipes; the M5C config sets all four MQTT packages to `is not set`. **Read the `.config`, not the package directory** |
+| A-13 | Cited a **comment in the firmware** as the fact, when the code beside it disagreed | The `multi_pack_recv` docstring documents the frame header as `$`; the state machine checks `@`. First-party source is Tier 1, but *its prose is not* — only its logic is. Same trap as A-02, one level up |
 
 ## 4. Facts — with a command to verify each
 
@@ -93,6 +104,24 @@ new claims (A-05).
 | F-020 | **`M114` cannot prove motion.** `M114_DETAIL`/`_REALTIME`/`_LEGACY` compiled out; `Count X:` is `planner.position`. Proves acceptance, refusal, and with `M400` queue completion | [`jog-confirmation-research.md`](jog-confirmation-research.md) |
 | F-021 | Jog is confirmable only to "accepted, queued, drained". `FACT_PATHS` has no position entry | `grep -A20 FACT_PATHS web/printer_snapshot.py` |
 | F-022 | **Fan is confirmable in principle (F-003), still not as implemented.** The fact is now wired (F-007/F-008), but we send raw `M106` and `REPORT_FAN_CHANGE` is compiled out, so the MCU never tells the module and `1005` never fires for our own commands. **Remaining work: send native `FAN_SPEED` (`0x3ed`) instead of `M106`** — then the module updates, publishes 1005, and the action confirms | `grep -n 'M106' web/printer_actions.py` |
+
+### The control layer, mapped to Tier 1 (issue #26, 2026-07-28)
+
+Source is `V8110_V3.0.21`; **the printer runs V3.1.56**. Strong about intent and
+structure, not byte-truth. Detail: findings §"The control layer, mapped to
+published source".
+
+| # | Fact | Verify |
+| --- | --- | --- |
+| F-030 | **The module speaks a framed multi-command packet protocol, not a G-code stream**: **`@`**`<g0>,<g1>,…*<crc16>` on UART1 only. ⚠️ The firmware's own docstring says `$`; the state machine checks `@`. **Cite `:690`, not the comment at `:670`.** Tier 1 `CONFIRMED` | `queue.cpp:690`, `:680` |
+| F-031 | **`ok` semantics differ per command, by design.** `ak_gcode_parse` sorts traffic 4 ways: intercepted (`M2021`-`M2024`); **early-`ok`-then-queued** (`M106`, `M107`, `M104`, `M140`, `M204`, `M205`, `M220`, `M221`, `M900`, `M4897`); **high-priority out-of-band** (`M114`, `M115`, `M116`, `M155`, `M290`, `M420`, `M3003`, `M3012`); `^`-prefix. **`G1` acks at enqueue; `M106` acks before executing.** Only `M400`-class blocking commands ack on completion. The first two classes share one `#if ENABLED(ANKER_PAUSE_FUNC)` (`:440`–`:470`), enabled on this build | `queue.cpp:414-496`, `:527` |
+| F-032 | **`M2024` is not a Marlin G-code.** No dispatcher case; intercepted at `queue.cpp:453` → `anker_stop_start()`. Its `ok` proves the MCU set `stop_flag`, never that the module ended the job — the 2026-07-10 Stop incident, from source | `anker_pause.cpp:362`, `anker_pause.h:21` |
+| F-033 | **`eufyMake-linux-sdk` is BSP only** — bootloader, kernel, buildroot, drivers; the Anker application is unpublished. Its `mipsel`/MIPS32R5 buildroot config **disables every MQTT package** (`PAHO_MQTT_C`, `_CPP`, `MOSQUITTO`, `JANUS_MQTT`) and sets an empty rootfs overlay, so the published image lacks even the libraries the app would need. **Opcode payloads cannot be read from source; capturing the official app is the only route.** Closes `method.md` §5 item 3 | findings §4 of the control-layer map |
+| F-034 | **The plate-strike descent is the *normal* Z-homing path.** A real print fails the `G28.cpp:263` gate too (no `G36` ⇒ no `g36_running_flag`), so it also homes Z via `after_homing_action` → `G2001` → `home_z_safely()`. Only `anker_homing.is_clean` differs, gating a nozzle-wipe + Z clearance first. **Sharpens F-013; does not answer it.** ⚠️ Load-bearing and physical: this is V3.0.21 source against a **V3.1.56** machine — confirm against the printer before acting on it | `G28.cpp:263`, `anker_homing.cpp:198-220` |
+| F-035 | **`G28 X Y` cannot descend Z.** `anker_z_homing_options` is reset unconditionally at every `G28` (`G28.cpp:505`) and set only inside `if (doZ)` (`:595`); `is_center_home()` requires it. The `/ws/ctrl` allowlist is validated against source | `G28.cpp:505`, `:595`, `anker_homing.cpp:176` |
+| F-036 | **The working flow injects `M4899 T3` right after `G28`** (S-curve motion + new linear-advance model, `LIN_ADV_VERSION_3`), plus `M900 T0 K0.0x` and `M205`, via the slicer profile's `gcode_substitutions`. **We send none of them.** The M5C start G-code itself contains **no `G36`** | `planner.h:189`; `AnkerMake base/base.ini:73` |
+| F-037 | **`M290` is Z-only, clamped to ±2mm per call, and also shifts the `M851` probe offset** (`BABYSTEP_ZPROBE_OFFSET` on, `BABYSTEP_XY` off). It is high-priority/out-of-band | `M290.cpp:94`, `Configuration_adv.h:1883`, `:1901` |
+| F-038 | **`M401` cannot arm the probe**: its body is `probe.deploy()` + `TERN_(PROBE_TARE, probe.tare())`, and `PROBE_TARE` is commented out. The observed 14.9mm lift was the deploy | `M401_M402.cpp:34`, `Configuration.h:1236` |
 
 ## 5. Settled — do not re-derive
 
@@ -143,12 +172,18 @@ Ordered by what actually unblocks the goal:
    Sending `0x3ed` is the remaining half — **its payload is unknown and must not
    be guessed** (A-04); capture the official app driving the fan. Closes the fan
    half of #15.
-3. **#26 — map the control layer to Tier 1.** The ledger's firmware section read
-   2 of 3 config files (A-01), so any row may be wrong.
+3. **~~#26 — map the control layer to Tier 1~~ (done 2026-07-28).** Every command
+   we send now has a cited implementation or an explicit "not determinable"
+   (F-030…F-038). The firmware section was re-verified against all three config
+   files and every surviving row held.
 4. **#12 — jog contract.** Needs design, not implementation. F-020 bounds what it
-   can promise.
+   can promise — and **F-031 tightens it**: `G1`'s `ok` fires at enqueue, and
+   `M114` jumps the queue, so neither orders against motion without `M400`.
 5. **#27 / F-013 — the probe discriminator.** Gates all homing work. Not
-   answerable over MQTT (F-006); needs `eufyMake-linux-sdk` or serial access.
+   answerable over MQTT (F-006), and **F-033 rules out the Linux SDK** — so this
+   needs serial access or an official-app capture. **F-034 restates the question**:
+   a real print takes the same descent path, so the discriminator is the
+   `is_clean` preamble or probe arming, not the branch.
 6. **#19 — contract the legacy path.** The finish line for #6; blocked on the
    validations above.
 

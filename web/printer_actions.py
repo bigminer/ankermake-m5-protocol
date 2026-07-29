@@ -257,7 +257,9 @@ class PrinterActions:
             # rather than letting it decay into a confirmation_timeout that
             # reads as a failure of the Stop.  The fan is deliberately excluded:
             # Stop sends only PRINT_CONTROL and M2024, so we have no evidence
-            # it halts the fan.
+            # it halts the fan.  M2024 is not even a Marlin G-code -- the queue
+            # parser intercepts it and its "ok" only proves the MCU set
+            # stop_flag, never that the module ended the job (INDEX F-032).
             self._supersede_resource_targets(
                 request.printer_id, {"nozzle", "bed"}, "protective_stop_submitted"
             )

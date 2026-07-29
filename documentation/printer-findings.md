@@ -87,6 +87,266 @@ in Retracted claims.
 
 ---
 
+## The control layer, mapped to published source (2026-07-28, issue #26)
+
+Everything `ankerctl` sends, traced to its implementation in
+`eufymake/eufyMake-Marlin-M5C`. Paths below are relative to
+`release_marlin2.0/Marlin/`. This replaces inference with citation; where source
+cannot answer, that is recorded as such rather than guessed.
+
+⚠️ **Version skew bounds every row in this section.** `src/inc/ANKER_Config.h:49`
+sets `SHORT_BUILD_VERSION "V8110_V3.0.21"`; **our printer runs V3.1.56**. The
+published source is older than the installed firmware. These are Tier 1 facts
+about *intent and structure*, not guaranteed byte-truth for the machine. Any row
+below that becomes load-bearing for an action needs a Tier 0 check before it is
+trusted to that depth.
+
+**Method.** The repo was cloned and read locally, not sampled through a code
+search tool, and every config claim was checked by walking the enclosing `#if`
+stack rather than reading the matching line (`method.md` §2).
+
+### 1. How the module actually talks to Marlin — read this first
+
+The communication module does **not** feed Marlin a plain stream of G-code
+lines. It speaks a framed, CRC16-checked, multi-command packet protocol on
+**UART1**, and Marlin classifies each command inside a packet three different
+ways *before* the normal G-code dispatcher ever sees it.
+
+| Finding | Evidence | Status |
+| --- | --- | --- |
+| Wire format is **`@<gcode0>,<gcode1>,…*<crc16>`** — several G-codes per packet, `*` ends the frame, 4 hex checksum bytes follow, CRC16 over the body | State machine `queue.cpp:689-696` (`case 0: if (c != '@')`), `:698-702` (`*` → checksum state), `:584` (`multi_pack_process`), `:597-604` (CRC check, retry on mismatch), `:598` (CRC is over `buf + 1`, skipping the 1-byte header) | `CONFIRMED` |
+| ⚠️ **The firmware's own docstring is wrong about this.** `queue.cpp:669-671` documents the frame as `style:$<gcode0>,…` with a **`$`**; the state machine it describes checks for **`@`**. The code wins. An earlier draft of this row copied the `$` from that comment — the same "read the matching line, not the logic" trap as A-02, one level up | `queue.cpp:670` vs `:690` | `CONFIRMED` |
+| The path is UART1-only, explicitly for the Ingenic SoC | `queue.cpp:680` — `if (p != IS_UARTX) //only responce uart1 from junzheng`. "Junzheng" (君正) is Ingenic, whose X2000 is the upper computer's SoC (`eufyMake-linux-sdk/bootloader/uboot-x2000/`) | `CONFIRMED` |
+| Whole feature is gated on `ANKER_MULTIORDER_PACK`, which is **enabled** | `src/inc/ANKER_Config.h:62` | `CONFIRMED` |
+| Duplicate packets are suppressed by CRC + body compare | `queue.cpp:624-635` | `CONFIRMED` |
+| A packet is rejected wholesale if the ring buffer cannot hold every command in it | `queue.cpp:612-621` | `CONFIRMED` |
+
+**`ak_gcode_parse()` (`queue.cpp:414-496`) then sorts each command into one of
+four classes.** This function is the single most useful thing in the firmware for
+understanding our own traffic, and nothing in this repo had read it.
+
+| Class | Commands | What happens | Evidence |
+| --- | --- | --- | --- |
+| **Intercepted** — never reaches the dispatcher | `M2021`, `M2022`, `M2023`, **`M2024`** | Handled inline, `ok` sent, `return true` | `queue.cpp:441-456` |
+| **Early-`ok`, then queued** | `M204`, `M205`, `M900`, **`M106`**, **`M107`**, `M104`, `M140`, `M220`, `M221`, `M4897` | `ok` is emitted **at parse time, before execution**, then the command is queued normally. The in-source comment says: *"Reply first, do not execute, to prevent multiple resends"* | `queue.cpp:457-469` |
+| ⚠️ **Both of the above classes sit inside one `#if ENABLED(ANKER_PAUSE_FUNC)`** — it opens at `queue.cpp:440`, before `M2021`, and does not close until `:470`, *after* the `M106`/`M107` group. So the early-`ok` behaviour is conditional on the pause feature, not unconditional. `ANKER_PAUSE_FUNC` is `1` (`ANKER_Config.h:61`), so it is live on this build — but the two classes stand or fall together | `queue.cpp:440` / `:470`; `ANKER_Config.h:61` | `CONFIRMED` |
+| **High-priority, out-of-band** | **`M114`**, `M115`, `M116`, `M155`, **`M290`**, `M420`, `M3003`, `M3012` | Parsed and executed **immediately, ahead of everything already queued**, then `ok` | `queue.cpp:471-494` |
+| **`^` prefix** | any M-code — the `^` is rewritten to `M` | Immediate out-of-band execution. A deliberate escape hatch | `queue.cpp:420-431` |
+
+Everything else falls through to `ring_buffer.enqueue()` (`queue.cpp:653`).
+
+**`is_block_cmd()` (`queue.cpp:499-541`) decides when the packet-level `ok`
+fires.** Its list is inverted — these are the **non**-blocking commands:
+
+> `G0 G1 G2 G3 G90 G91 G92 M104 M114 M115 M116 M155 M204 M205 M220 M221 M290
+> M420 M900 M3003` — `queue.cpp:527`
+
+For any of those, the `ok` is sent as soon as the packet is enqueued
+(`queue.cpp:658-661`). **For everything else — `G28`, `G36`, `M105`, `M400`,
+`M109`, `M190` — the `ok` is withheld until the command completes.**
+
+🔑 **Three consequences that change how we read our own replies:**
+
+1. **An `ok` to `G1` means "queued", not "moved".** `G1` is non-blocking, so the
+   packet `ok` fires at enqueue time. This is Tier 1 confirmation of F-020/F-021
+   and it is now a source fact, not an inference.
+2. **An `ok` to `M106` means "received", not "fan changed"** — it is emitted
+   before execution by design, to stop the module resending. Any confirmation
+   built on that `ok` is measuring the parser, not the fan. See F-022.
+3. **`M400`'s `ok` is genuinely terminal**, because `M400` is a blocking command
+   and `M400` itself is `planner.synchronize()`. The `G36`-then-`M400` pattern at
+   `web/printer_actions.py:874` is correct for the right reason.
+
+### 2. The command map
+
+| We send | Firmware implementation | Notes | Status |
+| --- | --- | --- | --- |
+| `M2024` | **No dispatcher case exists.** Intercepted at `queue.cpp:453` → `anker_pause.cpp:362` `anker_stop_start()` | **`M2024` is not a Marlin G-code.** It is a string the Anker pause layer intercepts (`anker_pause.h:21` `ANKER_STOP_CMD_STR`), gated on `ANKER_PAUSE_FUNC` (`ANKER_Config.h:61`, enabled). Its `ok` proves the MCU set `stop_flag`, and says **nothing** about the module's job state — which is exactly the 2026-07-10 Stop incident, now explained from source | `CONFIRMED` |
+| `M106` / `M107` | `src/gcode/temp/M106_M107.cpp:61` / `:102` → `thermalManager.set_fan_speed()` | Early-`ok` class (above). `REPORT_FAN_CHANGE` is commented out at `Configuration_adv.h:3708`, so the MCU never volunteers the change upward. Both halves of F-022, cited | `CONFIRMED` |
+| `M114` | `src/gcode/host/M114.cpp:208` → `report_current_position_projected()` at `src/module/motion.cpp:275` | `M114_DETAIL`, `M114_REALTIME`, `M114_LEGACY` **all commented out** (`Configuration_adv.h:3704-3706`), so no `planner.synchronize()` and `Count X:` is `stepper.report_a_position(planner.position)`. **And `M114` is high-priority — it jumps the queue.** So it reports planner space *and* out of order with respect to queued motion | `CONFIRMED` |
+| `M105` | `src/gcode/temp/M105.cpp:29`; dispatched at `gcode.cpp:602` | **Blocking** (105 is absent from the non-blocking list), so it queues behind a running print rather than reading live. `print_heater_states()` emits hotend/bed/chamber temps and heater powers — **no fan field of any kind** | `CONFIRMED` |
+| `G28` (with Z) | `src/gcode/calibrate/G28.cpp:352`; Z branch `:578-596` | Runs `ANKER_Z_HOMING_SCRIPT` = `"G1 X2 Y-23 F12000"` (`src/pins/stm32f4/ANKER-V8110-5X/pins_ANKER_V8110_V0_4.h:116`), then `anker_home_z_safely()` (`:224`), whose probe gate is `:263`. See §3 | `CONFIRMED` |
+| `G28 X Y` | same, `doZ == false` | **Cannot reach the Z descent** — see §3. This validates the `/ws/ctrl` allowlist against Tier 1 | `CONFIRMED` |
+| `G36` | `src/gcode/calibrate/G34_M422.cpp:463`; bare `G36` → `anker_align.auto_align()` | `anker_align.cpp:96` sets `g36_running_flag`, `:100` calls `G28` itself, `:131` `kill()` on a failed alignment. Confirms F-011 and F-015 | `CONFIRMED` |
+| `M400` | `src/gcode/control/M400.cpp:29` — the whole body is `planner.synchronize()` | Blocking, so its `ok` is a true drain barrier | `CONFIRMED` |
+| `M401` | `src/gcode/probe/M401_M402.cpp:34` — `probe.deploy()`, then `TERN_(PROBE_TARE, probe.tare())` | `PROBE_TARE` is commented out (`Configuration.h:1236`, top level), so **the tare never runs**. "`M401` does not arm the probe" is now source-confirmed, not just observed | `CONFIRMED` |
+| `M290` | `src/gcode/motion/M290.cpp:78` | Three new facts: `BABYSTEP_XY` is **off** (`Configuration_adv.h:1883`) so it is **Z-only**; the value is **clamped to ±2mm per call** (`:94`); and `BABYSTEP_ZPROBE_OFFSET` is **on** (`Configuration_adv.h:1901`) so it **also mutates the `M851` probe offset** via `mod_probe_offset()`. It is also high-priority/out-of-band | `CONFIRMED` |
+| `G91` / `G1` / `G90` | `gcode.cpp:471` / `:361` / `:470` — `set_relative_mode(true/false)`, `G0_G1()` | All three non-blocking → `ok` at enqueue. `NO_MOTION_BEFORE_HOMING` is enabled (`Configuration.h:1368`, top level), which is the `echo:Home X/Y` refusal (F-016) | `CONFIRMED` |
+| `PRINT_CONTROL` (1008) | — | **Not determinable from published source.** See §4 | `CONFIRMED` (as a negative) |
+| `APP_QUERY_STATUS` (1027) | — | **Not determinable from published source.** See §4 | `CONFIRMED` (as a negative) |
+| `GCODE_COMMAND` (1043) | — | **Not determinable from published source.** See §4. What Marlin does with the *payload* once the module forwards it is §1 | `CONFIRMED` (as a negative) |
+
+### 3. `G28` — which branch a real print actually takes
+
+This corrects the shape of an open question rather than answering it.
+
+The probe gate at `G28.cpp:263` is
+`degHotend(0) >= EXTRUDE_MINTEMP && anker_align.g36_running_flag == true`
+(`EXTRUDE_MINTEMP 160`, `Configuration.h:719`, top level). The `else` at `:292`
+sets `anker_homing.is_home_z = true` and **moves nothing** — F-010, confirmed.
+
+But the working print flow never sets `g36_running_flag`, because the slicer's
+start G-code contains no `G36` (§5). So **a real print fails that gate too**, and
+its Z homing happens further down, in `after_homing_action()`
+(`anker_homing.cpp:198`) → `G2001` (`:220`) → `home_z_safely()`
+(`G28.cpp:766`) → `homeaxis(Z_AXIS)`. That is the same path as the plate strike
+(F-012).
+
+**So the strike path is not an aberrant branch — it is the normal one.** What
+differs is `anker_homing.is_clean`, set true only when the `:263` gate passes: it
+gates the nozzle-wipe script and a Z clearance *before* `G2001` runs
+(`anker_homing.cpp:202-217`). This sharpens F-013 from "why does the probe
+register hot but not cold" to a testable question: **does the wipe-and-clearance
+preamble explain the difference, or does probe arming differ as well?**
+`UNVERIFIED` — nobody has traced `Probe_homeaxis()`'s two modes yet. That is
+issue #27, and it is not answerable over MQTT (F-006).
+
+**Why `G28 X Y` is safe from this path.** `after_homing_action()` only reaches
+`G2001` when `is_center_home()` is true, which requires
+`anker_homing.anker_z_homing_options` (`anker_homing.cpp:176`). That flag is
+**reset to `false` unconditionally at the top of every `G28`** (`G28.cpp:505`,
+just after `doZ` is computed) and set true **only inside `if (doZ)`**
+(`G28.cpp:595`). A `G28 X Y` therefore cannot descend Z, on this source. The
+existing `/ws/ctrl` guard is correct — and it is now correct for a reason we can
+cite rather than a hope.
+
+### 4. What published source cannot tell us — and why that is now settled
+
+**`eufyMake-linux-sdk` is a BSP, not the application.** Its four top-level trees
+are `bootloader` (U-Boot for Ingenic X2000), `kernel`, `buildroot`, and
+`module_driver`. `module_driver` was enumerated **completely** (4,796 entries,
+untruncated) and contains only Wi-Fi and Bluetooth device drivers — zero
+`anker`/`eufy`/`mqtt` paths. `buildroot`'s package set is 2,352 stock upstream
+buildroot packages with no vendor package. **The Anker application that owns job
+state and translates MQTT command types into G-code is not in the repository.**
+
+🔑 **The build config settles it.** `buildroot/buildroot/.config.save` is
+`BR2_ARCH="mipsel"` / `BR2_MIPS_CPU_MIPS32R5` — the Ingenic X2000 XBurst core, so
+this is the M5C upper computer's own build, not a sample. In it:
+
+| Setting | Value |
+| --- | --- |
+| `BR2_PACKAGE_PAHO_MQTT_C` | `is not set` |
+| `BR2_PACKAGE_PAHO_MQTT_CPP` | `is not set` |
+| `BR2_PACKAGE_MOSQUITTO` | `is not set` |
+| `BR2_PACKAGE_JANUS_MQTT` | `is not set` |
+| `BR2_ROOTFS_OVERLAY` | `""` (empty) |
+
+**The published build enables no MQTT client at all, and adds no vendor rootfs
+overlay.** So the Anker application is not merely missing from the source tree —
+the published image does not even contain the libraries it would need. It is
+installed by some path this repository does not cover.
+
+⚠️ **Do not read the buildroot package *catalogue* as evidence.** `paho-mqtt-c`,
+`paho-mqtt-cpp` and `python-paho-mqtt` all have directories under
+`buildroot/buildroot/package/`, because upstream buildroot ships ~2,350 package
+recipes regardless of what any board enables. An earlier draft of this very
+section cited their presence as proof the upper computer "speaks MQTT through
+paho". It does not follow, and the config says the opposite. Presence of a recipe
+is not selection of a package — the same shape of error as A-02.
+
+⚠️ `.config.save` is buildroot's saved-configuration snapshot. It is strong
+evidence of the intended build and is `CONFIRMED` as *what this repo publishes*;
+it is not proof of the exact configuration in the shipped V3.1.56 image.
+
+| Consequence | Status |
+| --- | --- |
+| Opcode payloads (`1008`, `1027`, `1043`, `0x3ed`, …) **cannot be read from source**. Capturing the official app remains the only route | `CONFIRMED` |
+| This closes `method.md` §5 item 3 ("whether the SDK carries the MQTT application layer, or only the BSP") — **only the BSP** | `CONFIRMED` |
+| INDEX §5's "an unexercised opcode's payload is unknown and there is no convention to infer from" is therefore not a temporary gap. It is structural | `CONFIRMED` |
+
+⚠️ **Caveat, stated honestly.** The recursive tree listing for the whole repo was
+**truncated by the API at 63,580 entries**, covering `bootloader`, `kernel` and
+`buildroot`. The "no vendor application" conclusion is complete and untruncated
+for `module_driver` and for the buildroot package list, and is `STRONG` rather
+than exhaustive for the other two trees — both of which are upstream U-Boot and
+Linux.
+
+🔬 **A method trap that would have produced the opposite answer.**
+**`gh search code` returns zero results for *every* query against
+`eufymake/eufyMake-linux-sdk`, including control terms certain to match**
+(`Makefile`, `GNU`). The repo is simply not indexed. The same queries work
+against `eufyMake-Marlin-M5C`. A session that greps the SDK through code search,
+gets nothing, and concludes "no MQTT layer there" would be recording a tool
+artifact as a finding — the same shape as anti-pattern A-01. **Enumerate the git
+tree, do not search it.**
+
+### 5. Anker custom G-codes the working flow sends and we do not
+
+The slicer's start G-code for the M5C is, in full
+(`AnkerStudio/resources/profiles/Anker-ini/AnkerMake base/base.ini:73`, inherited
+via `*M5C-Variant*` → `*machine_base_common*`; the variant's own copy at `:589`
+is commented out):
+
+```gcode
+M104 S{first_layer_temperature[0]}  ; set final nozzle temp
+M190 S{first_layer_bed_temperature[0]}
+M109 S{first_layer_temperature[0]}
+G28 ;Home
+;LAYER_COUNT:{total_layer_count}
+```
+
+**There is no `G36` in it** — the working flow homes with `G28`, after `M109` has
+already taken the nozzle above `EXTRUDE_MINTEMP`. This is the Tier 1 statement of
+something the ledger previously asserted without a citation.
+
+The emitted file is then rewritten by the profile's `gcode_substitutions`
+post-processor, which is where the custom codes enter:
+
+| Injected | Where | What it does | Status |
+| --- | --- | --- | --- |
+| **`M4899 T3`**, inserted immediately after `G28 ;Home` | `…/AnkerMake M5C/0.4_nozzle/print.ini:60`, and every other M5C nozzle profile | `src/gcode/anker_gcode/M4200_M4900.cpp:205`. `T3` = `LIN_ADV_VERSION_3`, *"new version Scurve + new K lin_adv"* (`src/module/planner.h:189`) — selects the **S-curve motion profile and the new linear-advance model**, and rewrites acceleration, jerk and max feedrate. The profile labels the rule `";S-Curve"` | `CONFIRMED` |
+| `M900 T0 K0.03` / `K0.04` | same, profile-dependent (e.g. `print.ini:631`) | Stock Marlin linear-advance K factor | `CONFIRMED` |
+| `M205 X8.5 Y8.5 E2` | same | Stock Marlin jerk limits | `CONFIRMED` |
+
+**We send none of these.** Every job `ankerctl` starts therefore runs the printer
+on whatever motion profile was last selected, rather than the one the original
+flow sets per print. Whether that is materially harmful is `UNVERIFIED` — but it
+is a concrete, cited instance of the divergence `method.md` §1 calls a defect.
+
+🔑 **A bonus witness: the firmware tells us what the module sends.** The command
+lists in `ak_gcode_parse()` and `is_block_cmd()` were written to special-case the
+traffic the module actually produces. Taken together they name `M2021`–`M2024`,
+`M104`, `M106`, `M107`, `M114`, `M115`, `M116`, `M140`, `M155`, `M204`, `M205`,
+`M220`, `M221`, `M290`, `M420`, `M900`, `M3003`, `M3012` and `M4897`. That is
+Tier 1 evidence about the module's vocabulary obtained **without** capturing the
+module — useful for #12 and #15. `STRONG`, not `CONFIRMED`: it is the set the
+firmware author chose to special-case, which need not be exhaustive.
+
+### 6. Re-verification of the "Firmware facts" section
+
+Acceptance criterion for issue #26: that section read two of the three config
+files, so every row was re-checked against all three, reading the enclosing `#if`
+stack rather than the matching line.
+
+**Result: every surviving row holds.** No further row joined the one already
+marked `REFUTED` there. Verified at top level (unconditional) unless noted:
+`NOZZLE_AS_PROBE` (`Configuration.h:1101`), `Z_SAFE_HOMING` (`:1763`),
+`USE_PROBE_FOR_Z_HOMING` (`:1058`), `//SENSORLESS_PROBING` (`:1158`),
+`//PROBE_ACTIVATION_SWITCH` (`:1225`), `//PROBE_TARE` (`:1236`),
+`//PREHEAT_BEFORE_PROBING` (`:1311`), `EXTRUDE_MINTEMP 160` (`:719`),
+`NO_MOTION_BEFORE_HOMING` (`:1368`); `SENSORLESS_HOMING`
+(`Configuration_adv.h:2969`, inside `#if HAS_TRINAMIC_CONFIG`);
+`Z_SAFE_HOMING_X_POINT` / `_Y_POINT` = `X_CENTER` / `Y_CENTER`
+(`Configuration.h:1766-1767`, inside `#if ENABLED(Z_SAFE_HOMING)` at `:1765` —
+enabled, so the "Z homes to center" row holds).
+
+🔑 **The include order, which is what makes the third file load-bearing.**
+`src/inc/MarlinConfigPre.h` includes **`ANKER_Config.h` first, at `:37`** — then
+`Configuration.h` at `:43` and `Configuration_adv.h` at `:64`. So `ANKER_Config.h`'s
+switches are visible to every `#if` in the other two files. This is the mechanism
+behind the `USE_Z_SENSORLESS` correction, and it is why grepping two of three
+files produces confidently wrong answers rather than merely incomplete ones.
+
+Concretely, the `ANKER_PROBE_TIMEOUT` / `ANTHER_Z_DROP_DISTANCE` /
+`ANTHER_Z_RISE_DISTANCE` block sits **three levels deep**:
+`#if HAS_TRINAMIC_CONFIG` (`Configuration_adv.h:2604`) → `#if EITHER(SENSORLESS_HOMING,
+SENSORLESS_PROBING)` (`:2971`) → `#if ENABLED(USE_Z_SENSORLESS)` (`:2990`). All
+three conditions hold, so the block is live — the earlier "may be dead code" row
+stays `REFUTED`, now with the full nesting checked rather than a single flag.
+
+---
+
 ## Tooling: `scripts/printer-probe.py`
 
 Consolidates the throwaway scripts every session kept rewriting.
@@ -563,8 +823,14 @@ produced the `USE_Z_SENSORLESS` error corrected above.
 
 ### Firmware facts (read from source, V8110_DVT `Configuration.h` / `_adv.h`)
 
-⚠️ **This section read only two of the three config files.** See the
-`ANKER_Config.h` entry above; at least one row below was wrong as a result.
+⚠️ **This section originally read only two of the three config files.** See the
+`ANKER_Config.h` entry above; one row below was wrong as a result and is struck
+through and marked `REFUTED`.
+
+✅ **Re-verified 2026-07-28 (issue #26) against all three config files**, reading
+each enclosing `#if` stack rather than the matching line. Every surviving row
+holds; no additional row was refuted. Line-by-line result and the include-order
+mechanism are in §6 of "The control layer, mapped to published source" above.
 
 Source: `github.com/eufymake/eufyMake-Marlin-M5C`, path
 `release_marlin2.0/Marlin/Configuration/V8110/V8110_DVT/`. **V8110 is the M5C.**

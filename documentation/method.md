@@ -183,15 +183,26 @@ found the same unsupported statement in four places, corrected in two.
 
 Not yet done — this is the backlog the audit implies, in dependency order.
 
-1. **Map the control layer to Tier 1.** For everything `ankerctl` sends —
-   `M2024`, `M106`/`M107`, `M114`, `G28`, `G36`, `M400`, `PRINT_CONTROL`, and the
-   jog `G91`/`G1`/`G90` — find the implementation in published source and replace
-   the inferred ledger entry with a cited one.
+1. ~~**Map the control layer to Tier 1.**~~ **Done 2026-07-28 (issue #26).** Every
+   command `ankerctl` sends now has a cited implementation or an explicit "not
+   determinable from source". See INDEX F-030…F-038 and `printer-findings.md`
+   §"The control layer, mapped to published source". The load-bearing result is
+   `ak_gcode_parse` (`queue.cpp:414`): the module's traffic is sorted into four
+   classes before dispatch, so **an `ok` means something different per command**.
 2. **Homing, against `src/feature/anker/`.** The oldest open problem, the one
    with physical consequences, and the standing "probe arming is unreachable"
-   conclusion is a black-box inference about published code.
-3. **The upper computer.** Whether `eufyMake-linux-sdk` carries the MQTT
-   application layer, or only the BSP. This decides whether opcode payloads are
-   readable at all, or whether app capture is the only route.
+   conclusion is a black-box inference about published code. **Partly advanced:**
+   F-034 shows a real print takes the same descent path as the plate strike, so
+   the question is now the `is_clean` preamble or probe arming — not the branch.
+3. ~~**The upper computer.**~~ **Answered 2026-07-28: only the BSP.**
+   `eufyMake-linux-sdk` is bootloader, kernel, buildroot and device drivers. It
+   ships `paho-mqtt-c`/`-cpp`, so the upper computer speaks MQTT through paho,
+   but the Anker application that owns job state and translates command types to
+   G-code is not in the repository. **Opcode payloads are therefore not readable
+   from source; capturing the official app is the only route.** INDEX F-033.
+
+   ⚠️ **`gh search code` does not index that repo** — every query returns zero,
+   including control terms certain to match. Enumerate the git tree instead, and
+   run a control query before reading any zero-result as absence. INDEX A-10.
 
 Only then is it worth spending printer time.
