@@ -299,10 +299,23 @@ post-processor, which is where the custom codes enter:
 | `M900 T0 K0.03` / `K0.04` | same, profile-dependent (e.g. `print.ini:631`) | Stock Marlin linear-advance K factor | `CONFIRMED` |
 | `M205 X8.5 Y8.5 E2` | same | Stock Marlin jerk limits | `CONFIRMED` |
 
-**We send none of these.** Every job `ankerctl` starts therefore runs the printer
-on whatever motion profile was last selected, rather than the one the original
-flow sets per print. Whether that is materially harmful is `UNVERIFIED` — but it
-is a concrete, cited instance of the divergence `method.md` §1 calls a defect.
+**We send none of these**, because `ankerctl` uploads the sliced file
+byte-for-byte (`web/util.py:223` — it reads temperatures out for the preprint
+path but never rewrites G-code). A file sliced in AnkerStudio already carries
+`M4899 T3`; the documented OrcaSlicer workflow does not.
+
+Every such job therefore runs on whatever motion profile was last selected,
+rather than the one the original flow sets per print. **Whether that is
+materially harmful is `UNVERIFIED`** — nobody has printed the same model both
+ways, and assuming an effect would be A-05. It is a concrete, cited instance of
+the divergence `method.md` §1 calls a defect.
+
+📋 **Tracked by issue #32 — investigate, then decide.** The suspected defect is
+**non-determinism** rather than "wrong profile": `M4899` mutates planner settings
+in RAM and nothing is known to reset them per job, so the same file may print
+differently depending on what preceded it in the same power cycle. Two free
+source questions come first and may collapse the issue entirely — which profile
+the firmware boots into, and whether anything resets it between jobs.
 
 🔑 **A bonus witness: the firmware tells us what the module sends.** The command
 lists in `ak_gcode_parse()` and `is_block_cmd()` were written to special-case the
