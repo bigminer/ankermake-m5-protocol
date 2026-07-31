@@ -65,6 +65,49 @@ Authoritative about intended behaviour. **Check the build config actually used**
 a feature present in Marlin may be compiled out for V8110_DVT, which is exactly
 the fan case.
 
+#### Getting the sources locally — do this first, every time
+
+**Clone and grep. Do not sample through a code-search tool.** Two of this repo's
+anti-patterns (A-01, A-02) and one of its worst near-misses came from reading a
+search snippet instead of a file. The Marlin repo is ~45 MB and clones in
+seconds:
+
+```sh
+git clone --depth 1 https://github.com/eufymake/eufyMake-Marlin-M5C.git
+```
+
+Everything lives under `release_marlin2.0/Marlin/`. The three config files are
+`Configuration/V8110/V8110_DVT/Configuration.h`, `…/Configuration_adv.h`, and
+**`src/inc/ANKER_Config.h`**.
+
+**Include order matters and is the reason the third file is load-bearing.**
+`src/inc/MarlinConfigPre.h` includes `ANKER_Config.h` at `:37`, *before*
+`Configuration.h` (`:43`) and `Configuration_adv.h` (`:64`) — so the Anker
+switches are visible to every `#if` in the other two.
+
+**For any config flag, read the enclosing `#if` stack, not the matching line.**
+A `#define` can be uncommented and still dead. Walk the preprocessor stack
+upward from the hit; the `USE_Z_SENSORLESS` block sits three levels deep, and
+`PROBING_NOZZLE_TEMP` is live-looking but inside a disabled block.
+
+⚠️ **`gh search code` does not index `eufyMake-linux-sdk`.** Every query returns
+zero results — including control terms certain to match, like `Makefile`. A zero
+result there is a tool artifact, not absence (A-10). It *does* index
+`eufyMake-Marlin-M5C`. **Run a control query before reading any zero as
+absence.**
+
+The other two repos are large (linux-sdk ~727 MB, PrusaSlicer ~156 MB) and rarely
+need cloning. Enumerate them through the API instead:
+
+```sh
+gh api "repos/eufymake/eufyMake-linux-sdk/git/trees/main?recursive=1"   # check .truncated
+gh api "repos/eufymake/eufyMake-PrusaSlicer-Release/contents/<path>" --jq '.content' | base64 -d
+```
+
+⚠️ **A buildroot `package/` directory is a catalogue, not a build.** Upstream
+ships ~2,350 recipes regardless of what the board enables. Read
+`buildroot/buildroot/.config.save` to see what is actually selected (A-12).
+
 Three rules learned the hard way on 2026-07-28, all of which produced wrong
 conclusions first:
 

@@ -359,10 +359,55 @@ paths in `stepper.cpp` stay off. The left column above is the *compile-time*
 default, **not necessarily what this printer boots with**. `UNVERIFIED` for this
 unit.
 
-🔬 **Cheapest next step, and it is free.** `M503` reports the stored settings. It
-is a pure read — no motion, no heat — so it does **not** require operator presence
-under `CLAUDE.md`. Run it before any print comparison; it tells us which column
-this machine actually starts in and may make the supervised test unnecessary.
+#### The `M503` read, run 2026-07-31 — partial answer, and a transport limit
+
+Read-only: `M503`, `M204`, `M114`. No motion, no heat. Operator present and the
+printer idle; broker log showed current PUBLISHes throughout.
+
+🚧 **The primary question could not be answered, because long G-code replies do
+not survive the `1043` transport.** This is a new finding and it constrains a lot
+of future work.
+
+| Observation | Reply | Status |
+| --- | --- | --- |
+| `M503` returns only its **tail**, and lossily — one line arrived mangled as `echo:; Hybrid Threshol X333 Y333 Z282`, two lines merged | ~21 lines, head missing | Obs `CONFIRMED` |
+| `M204` (bare — a pure read, `M200-M205.cpp` reports and skips the `else`) truncates **mid-word** at exactly 32 chars: `"ok\n\nok\n\n+ringbuf:1,512,0\nAcceler"`. Sent three times, byte-identical each time | payload lost | Obs `CONFIRMED` |
+| `M114` as a control: payload arrives **complete**, only the trailing `+ringbuf:` suffix is cut | usable | Obs `CONFIRMED` |
+
+**The truncation is not ours.** `resData` appears nowhere in `libflagship/` or
+`specification/`; `ankerctl` passes the module's JSON through untouched. So a
+reply is readable only if its payload arrives *early* in the message — `M114`
+leads with data, `M204` leads with ~25 bytes of acks and loses everything after.
+**`M503` is unusable over MQTT and no amount of window-widening fixes it.**
+
+🔑 **A live confirmation of F-031 fell out of it.** Every `M204` reply begins
+`ok\n\nok\n\n` — **two** acks. That is exactly what the source predicts: `M204`
+is in `ak_gcode_parse`'s early-`ok` list (`queue.cpp:457-469`) *and* in
+`is_block_cmd`'s non-blocking set (`:527`), so it gets one ack at parse time and
+a second at packet level. Tier 0 agreeing with Tier 1 on a non-obvious
+prediction.
+
+✅ **What we did learn — `M4899` has not run since the last boot.** The `M503`
+tail reports **`M913 X333 Y333`**. Every `M4899` branch sets that pair
+explicitly: T0 and T1 → `X329 Y329`, T2 and T3 → `X0 Y0`
+(`M4200_M4900.cpp:248`, `:259`, `:289`, `:320`). The observed 333 is **neither**,
+so no `M4899` of any version has executed this power cycle. Combined with F-039's
+boot default, this printer is in **`LIN_ADV_VERSION_0`**. Obs `STRONG` — it is a
+deduction from one value, and no mechanism is known that would rewrite `M913`
+after an `M4899`, but none was ruled out either.
+
+⚠️ **The hybrid-state risk is still open, and one number now points at it.** The
+compile-time default is `X_HYBRID_THRESHOLD 329` (`Configuration_adv.h:2924`).
+This machine reports **333**. That value is in neither the source defaults nor
+any `M4899` branch, so **its EEPROM has been written with customised settings at
+some point**. Whether the saved acceleration and feedrate are the VERSION_0
+figures or T3's could not be read — that is precisely what `M204` truncated.
+`UNVERIFIED`, and it is the remaining question for #32.
+
+🔬 **Next step is no longer `M503`.** Reading stored motion limits needs a path
+that is not the `1043` reply: serial access to the MCU, or an official-app
+capture. Do not spend more printer time re-running `M503`; it is a transport
+limitation, not a flaky read.
 
 🔑 **A bonus witness: the firmware tells us what the module sends.** The command
 lists in `ak_gcode_parse()` and `is_block_cmd()` were written to special-case the
