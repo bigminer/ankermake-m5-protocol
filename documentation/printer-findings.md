@@ -310,12 +310,59 @@ materially harmful is `UNVERIFIED`** — nobody has printed the same model both
 ways, and assuming an effect would be A-05. It is a concrete, cited instance of
 the divergence `method.md` §1 calls a defect.
 
-📋 **Tracked by issue #32 — investigate, then decide.** The suspected defect is
-**non-determinism** rather than "wrong profile": `M4899` mutates planner settings
-in RAM and nothing is known to reset them per job, so the same file may print
-differently depending on what preceded it in the same power cycle. Two free
-source questions come first and may collapse the issue entirely — which profile
-the firmware boots into, and whether anything resets it between jobs.
+📋 **Tracked by issue #32 — investigate, then decide.**
+
+#### The two gating source questions, answered (2026-07-31)
+
+Both were opened as possible ways to collapse #32. **Neither does — they enlarge
+it.**
+
+**Q1 — which profile does the firmware boot into?** `LIN_ADV_VERSION_0`, the old
+one, and **it is not persisted**: `planner.cpp:253` is the static initializer, and
+`LIN_ADV_version_change` appears **nowhere in `settings.cpp`**, so no saved value
+can override it. Every power cycle starts at VERSION_0 regardless of history.
+**`M4899 T3` is therefore not a no-op on a fresh boot.** `CONFIRMED`.
+
+What T3 changes, from `M4200_M4900.cpp:294-322` versus the VERSION_0 branch at
+`:226-247`:
+
+| | VERSION_0 (boot) | VERSION_3 (`M4899 T3`) |
+| --- | --- | --- |
+| `acceleration` / `travel_acceleration` | 2500 | **6000** |
+| `max_acceleration` X/Y | 2500 | **6000** |
+| `max_feedrate` X/Y | 250 | **600** |
+| `max_feedrate` E | 250 | **120** |
+| `max_acceleration` E | 2500 | 3500 |
+| Jerk X/Y/Z/E | 10.0 | 10.0 — **identical** |
+| X/Y TMC mode | untouched | `M569 S0 X Y` — spreadCycle |
+| Hybrid threshold | untouched | `M913 X0 Y0` |
+
+So without `M4899 T3` the planner is capped at roughly **40% of the intended
+acceleration and X/Y feedrate ceiling**, and the X/Y drivers are never switched
+to spreadCycle. Note E moves the *other* way — T3 is a different tuning, not a
+uniformly faster one. Constants: `LA_V1_DEFAULT_*` vs `DEFAULT_*`.
+
+**Q2 — does anything reset it between jobs?** **No.** The only writes in the
+entire firmware are `M4899`'s four branches (`M4200_M4900.cpp:226`, `:255`,
+`:267`, `:298`) plus the static initializer. Nothing at job start, nothing in
+`M2024`, and nothing the communication module can reach except by sending
+`M4899` itself. **The RAM-persistence claim is `CONFIRMED`.**
+
+⚠️ **But the flag and the limits persist differently, and that is the open
+part.** The version flag is not in EEPROM; the **planner limits are**.
+`settings.first_load()` runs at boot (`MarlinCore.cpp:1423`), so acceleration and
+feedrate come from EEPROM when a value was saved. `M4899` never saves — only its
+T1 branch touches EEPROM, and it *loads* (`M4200_M4900.cpp:256`). So if an `M500`
+ever ran while T3 limits were active, the machine boots into a **hybrid**: high
+limits from EEPROM, but the flag at VERSION_0 so the S-curve and new lin-adv ISR
+paths in `stepper.cpp` stay off. The left column above is the *compile-time*
+default, **not necessarily what this printer boots with**. `UNVERIFIED` for this
+unit.
+
+🔬 **Cheapest next step, and it is free.** `M503` reports the stored settings. It
+is a pure read — no motion, no heat — so it does **not** require operator presence
+under `CLAUDE.md`. Run it before any print comparison; it tells us which column
+this machine actually starts in and may make the supervised test unnecessary.
 
 🔑 **A bonus witness: the firmware tells us what the module sends.** The command
 lists in `ak_gcode_parse()` and `is_block_cmd()` were written to special-case the
