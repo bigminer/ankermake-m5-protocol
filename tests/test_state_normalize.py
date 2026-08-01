@@ -12,7 +12,7 @@ class NormalizeTests(unittest.TestCase):
                 "name": "cube.gcode",
                 "progress": 4200,
                 "totalTime": 65,
-                "time": 125,
+                "time": 125000,
                 "img": "http://printer.local/preview.jpg",
                 "state": "printing",
             }),
@@ -27,6 +27,22 @@ class NormalizeTests(unittest.TestCase):
                 },
             },
         )
+
+    def test_remaining_is_milliseconds(self):
+        """1001's `time` is remaining MILLISECONDS, not seconds (INDEX F-044).
+
+        Regression for a live defect: the raw value went straight to the UI, so
+        a real ~2.6h-remaining print rendered "2631:07:34" -- about 110 days.
+        The value below is the one actually observed on 2026-08-01; evidence in
+        documentation/captures/2026-08-01-live-print-1001-fields.jsonl.
+        """
+        out = normalize({"commandType": 1001, "time": 9472157})
+        self.assertEqual(out["print"]["remaining"], 9472)  # 2h 37m, not 2631h
+
+    def test_remaining_zero_before_print_starts(self):
+        """`time` is 0 until printing begins; it must not become negative or None."""
+        out = normalize({"commandType": 1001, "time": 0})
+        self.assertEqual(out["print"]["remaining"], 0)
 
     def test_print_job_partial(self):
         self.assertEqual(normalize({"commandType": 1001, "name": "job.gcode"}),

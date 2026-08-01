@@ -46,7 +46,12 @@ def normalize(obj):
         if "totalTime" in obj:
             p["elapsed"] = obj["totalTime"]
         if "time" in obj:
-            p["remaining"] = obj["time"]
+            # 1001's `time` is remaining MILLISECONDS, not seconds. Observed on a
+            # live ~3h print 2026-08-01: it read 9_472_157 while the operator's
+            # job had ~2.6h left, and the UI rendered that raw as "2631:07:34".
+            # It is a live re-estimate, not a countdown -- it rises as well as
+            # falls. See INDEX F-044.
+            p["remaining"] = obj["time"] // 1000
         if "progress" in obj:
             p["progress"] = obj["progress"]
         if "img" in obj:

@@ -580,6 +580,18 @@ scripts/printer-probe.py gcode "M105" # arbitrary send; refuses the dangerous se
 | `status` and `gcode` live paths | `CONFIRMED` 2026-07-27 — `status` run three times (one produced the full 1027 enumeration), `gcode` twice. Note `gcode` filters replies starting `ok T:`, so an `M105` sent through it prints nothing; that is the filter, not a failure. |
 | `pos` / `endstops` / `watch` live paths | `UNVERIFIED` — still never exercised in this form. **Test before trusting.** |
 
+⚠️ **Two capture tools, and they are not equally trustworthy — do not confuse
+them (INDEX A-17).**
+
+| Tool | Robustness |
+| --- | --- |
+| `scripts/capture-mqtt.py` — produced everything in `captures/` | **Sound.** Survives timeouts, reconnects on error, and records `_event: recv_failed` so loss is *visible*. Both print captures show zero such events and zero unparsable records. |
+| `scripts/printer-probe.py` `collect()` | **Was broken** until 2026-08-01: `except Exception: break` ended the whole capture on the first timeout, returning a partial result indistinguishable from silence. Now skips the frame, breaks only on a closed socket, and reports the count. |
+
+A session found the `collect()` bug and warned that `captures/` was therefore
+suspect. **It is not** — different tool. Check which one produced the artifact
+before doubting it.
+
 ## Transport quick reference
 
 **Auth** (token is *not* in `.env` — it's in the LaunchAgent):

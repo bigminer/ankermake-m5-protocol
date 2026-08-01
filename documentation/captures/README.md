@@ -66,7 +66,7 @@ Model was a small functional part in PLA, 43 layers, ~14 minutes.
 | **`1026` correlates with homing** — once per capture, both after a `G28` | part 1 `_t≈261`; part 2 `_t≈540` |
 | **State `8` = preparation**, held ~123s before state `1` | part 1, `1000/subType 1` |
 | **State `4` follows normal completion**, not only Stop | part 2, after progress `10000` |
-| **Zero `1043` messages in the entire run** | `grep -c 1043` → 0 |
+| **No module-originated `1043`** — part 1 has none; part 2 has exactly **one**, an `M105` reply (`ok T:36.00 /0.00 B:43.60 /0.00`) answering a poll our own web UI sends. ⚠️ Corrected 2026-08-01; this row previously read "zero in the entire run", which was false against the file | part2 line 1227 |
 | `1052` and `1037` are sent once at job start | part 1, early |
 | Preheat matched the slicer profile: nozzle 150 → 220, bed 60 | `1003`/`1004` targets |
 | Cooldown to nozzle 38C / bed 46C with targets 0 | part 2, tail |
@@ -88,6 +88,25 @@ truncated. This is the primary evidence for INDEX F-040, F-041 and F-043.
 | The splice **drifts between runs** | `M503` `_identical_across_runs: false` |
 | Byte loss is proven, not a firmware quirk | one `M503` frame holds both `echo:; PID settings:` and `; Controller Fan` |
 | `M913` is the sole evidence for F-041 | `M913` record |
+
+---
+
+## `2026-08-01-live-print-1001-fields.jsonl`
+
+**Passive** capture during a live ~3h print, operator present, nothing sent.
+Filtered to `commandType 1001` only. Primary evidence for INDEX **F-044**.
+
+| Observation | Where to look |
+| --- | --- |
+| **`time` is remaining MILLISECONDS** — `9472157` while ~2.6h remained | any record's `time` |
+| **`time` is a re-estimate, not a countdown** — it rose +443/s over 288s | compare `time` at first and last record |
+| **`totalTime` is overloaded** — `172` then `191` before printing (an estimate), then resets and counts elapsed seconds at 1.00/s | `totalTime` across the first ~40 records |
+| **`progress` is hundredths of a percent** | `progress` vs elapsed |
+| `startLeftTime` is stuck at `1` — not a countdown | any record |
+
+This capture found a live UI defect: the raw `time` reached the dashboard as
+seconds and rendered **`2631:07:34`**. Fixed in `web/service/state.py`, regression
+test in `tests/test_state_normalize.py`.
 
 ### Useful one-liners
 

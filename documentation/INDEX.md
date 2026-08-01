@@ -23,8 +23,10 @@ If your next move appears here, the answer already exists. Do not derive it.
 | explain the plate strikes | Traced: `G2001` → `home_z_safely()` → unguarded `homeaxis(Z_AXIS)` | F-012 |
 | test homing with a hot nozzle | **Do not.** The premise is refuted; the descent path has no temperature guard | §6, F-013 |
 | reason about `M119`'s `z_probe: open` | Meaningless — **the probe is not on that pin.** Strain gauge, nozzle board, UART | F-014 |
-| capture MQTT to learn what the module sends Marlin | **Impossible.** Zero `1043` in a full print; that link is invisible | F-006 |
+| capture MQTT to learn what the module sends Marlin | **Impossible.** The module never originates a `1043` — the only ones present are replies to polls we sent. That link is invisible | F-006 |
+| plan to observe `+ringbuf` from a passive print capture | **You will find nothing.** It rides only on `1043` replies, and those exist only when *we* send a command. Drive it, don't watch for it | F-042, #33 |
 | add a "fresh state" gate to any action | The M5C **never pushes `state`**. It is stale 15s after a poll. This has broken two actions already | §5 |
+| use a `1001` field as seconds, or as a countdown | **Units differ per field.** `time` is **milliseconds** and re-estimates upward as well as down; `totalTime` is an estimate before the print and elapsed seconds during it; `progress` is hundredths of a percent | F-044 |
 | send an opcode we have never sent | Its payload is unknown and **there is no convention to infer from** — 4 shapes across 3 opcodes | §5 |
 | conclude `print_start` sends `G36` ungated | **It does not.** `ANKERCTL_PREPRINT_G36` gates it via `extract_temperatures` at `web/__init__.py:776` — no temps, no `bed_celsius`, no preparation. An audit got this wrong by reading `printer_actions.py` alone | A-09, issue #25 |
 | conclude anything from `M105` about the fan | No fan field, and `REPORT_FAN_CHANGE` is compiled out | F-022 |
@@ -74,6 +76,7 @@ Firmware is strong evidence of intent, not byte-truth. Full rules:
 | A-14 | Saw the **same number in two places and assumed one quantity** | `BUFSIZE 512` (command slots) and the observed 512-**byte** payload cap. Built a "module returns the last 512 bytes of a ring buffer" mechanism on it and stated it as fact. Two 512s in one system is a coincidence until evidence links them |
 | A-15 | Called a result **deterministic** after comparing only a substring | Three `M503` runs "identical" — but only a grepped fragment was compared. The full frames differed every time and the splice point moved. **Hash the whole artifact, not a slice of it** |
 | A-16 | Generalised a **threshold** from the two samples that happened to hit it | "Under 512 bytes replies are complete" — written into F-040 from `M114`/`M913`, then refuted hours later by `M92` and `M204` truncating at 32. The real rule was a terminator, not a length. **Test the boundary you are about to assert, in both directions** |
+| A-17 | Attributed a bug in **one tool** to data produced by **another** | Found the silent-abort in `printer-probe.py`'s `collect()` and warned that `captures/` was therefore suspect. It is not — those come from `capture-mqtt.py`, which reconnects and records `recv_failed`, and both print captures show **zero** such events. Nearly triggered a needless re-capture. **Check which tool actually produced the artifact** |
 
 ## 4. Facts — with a command to verify each
 
@@ -84,14 +87,15 @@ new claims (A-05).
 
 | # | Fact | Verify |
 | --- | --- | --- |
-| F-001 | Printer pushes **temperatures only** unprompted (`1003`/`1004`, ~3s), plus a few on-change types during a job. Obs `CONFIRMED` | `grep -c '"commandType":1003' documentation/captures/*.jsonl` |
+| F-001 | Printer pushes **temperatures only** unprompted (`1003`/`1004`), plus a few on-change types during a job. Interval measured **exactly 3.00s** across 20 consecutive gaps on 2026-08-01 — the earlier "~3s" was right. Obs `CONFIRMED` | `grep -c '"commandType":1003' documentation/captures/*.jsonl` |
 | F-002 | **No position anywhere.** `APP_QUERY_STATUS` (1027) returns 13 non-temp types, none a coordinate. `M114` over `1043` is the only path. Obs `CONFIRMED` | findings §"APP_QUERY_STATUS enumerated" |
 | F-003 | **`1005` is fan speed**, percent, published **on change only** — 99 mid-print, 0 at completion. Obs `CONFIRMED`; naming Inf strong | `grep '"commandType":1005' documentation/captures/*.jsonl` |
 | F-004 | **`1026` is emitted after homing** (twice, both post-`G28`). Bidirectional: as a *command* `value 2` drove the nozzle into the plate. Obs `CONFIRMED`; semantics `UNVERIFIED` | `grep '"commandType":1026' documentation/captures/*.jsonl` |
 | F-005 | States: `0` idle · `1` printing · `4` **finished or stopped** · `8` preparing (~123s). Obs `CONFIRMED` | `grep '"commandType":1000' documentation/captures/*.jsonl \| grep -oE '"value":[0-9]+' \| uniq -c` |
-| F-006 | **Zero `1043` in a full print.** The module publishes status only; its Marlin serial link is invisible over MQTT. Obs `CONFIRMED` | `grep -c '"commandType":1043' documentation/captures/*.jsonl` → 0 |
+| F-006 | **The module never *originates* a `1043`.** Its Marlin serial link is invisible over MQTT — capturing MQTT cannot show what it sends Marlin. Obs `CONFIRMED`. ⚠️ **Corrected 2026-08-01: the old wording "zero `1043` in a full print" was false against its own evidence.** `part2` contains exactly one, `resData: "ok T:36.00 /0.00 B:43.60 /0.00"` — an **`M105` reply**, i.e. an answer to a poll *our own web UI* sends ([`ankersrv.js:441`](../static/ankersrv.js#L441)), not module-originated traffic. That every `1043` present is a reply to us **strengthens** the claim; the count does not | [part2 line 1227](captures/2026-07-28-orca-print-part2.jsonl); `grep '"commandType":1043' documentation/captures/2026-07-28-orca-print-part*.jsonl` |
 | F-007 | `normalize()` maps `1000/1001/1003/1004/**1005**/1006/1052`. **Unnamed types can never become facts** — check here before concluding the printer does not report something. `1005`→`fan` wired 2026-07-28 | `grep -n 'ct ==' web/service/state.py` |
 | F-008 | **`fan` is a tracked fact** in `FACT_PATHS`. ⚠️ Published on change only, so it reads `stale` for most of a print while staying accurate — same shape as `state`. **Do not gate an action on `fan` freshness** without reading F-003 | `grep -n 'fan' web/printer_snapshot.py` |
+| F-044 | **`1001` field units, from a live ~3h print.** ⚠️ **`time` is remaining MILLISECONDS**, and it is a **live re-estimate — it rises as well as falls** (measured +443/s over 288s, so it is *not* a countdown). Rendering it raw showed **`2631:07:34`** (~110 days) for a job with ~2.6h left — fixed at `state.py` by `// 1000`. **`totalTime` is overloaded**: a pre-print *estimate* (172, revised to 191 — minutes, `Inf`), then it resets and counts **elapsed seconds** at exactly 1.00/s once printing. **`progress` is hundredths of a percent** (`10000` = 100%). `startLeftTime` sat at `1` throughout — not a countdown. Temps are hundredths of a degree (`22000` = 220.00C). Obs `CONFIRMED`; four independent estimates of total duration agreed at 2.8–3.0h, including the operator's | [capture](captures/2026-08-01-live-print-1001-fields.jsonl); `tests/test_state_normalize.py` |
 
 ### Homing
 
