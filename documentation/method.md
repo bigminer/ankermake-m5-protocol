@@ -135,11 +135,31 @@ targets the **M5**, not the M5C, and the two differ.
 
 ### Tier 3 — this repository
 
-`specification/*.stf`, `libflagship/`, `web/`, `static/`, and every generated
-opcode table.
+`specification/*.stf`, `libflagship/`, `web/`, `static/`, every generated opcode
+table — **and this documentation set itself, including `INDEX.md` and
+`printer-findings.md`.**
 
 **These are not evidence about the printer.** They are our hypotheses, written
-down. `specification/mqtt.stf` is a hand-maintained reverse-engineering artifact;
+down.
+
+⚠️ **That last inclusion is the one people miss, and it is the whole point.** A
+fact row is a claim someone wrote down, not a fact. Several have been wrong:
+F-040 was refuted by the very session that committed it, hours later, on wider
+testing. **Citing a fact row does not promote it to fact** — follow it to its
+evidence (a rerunnable test, published first-party source, or a trusted external
+doc) and cite *that*. A row you cannot follow is a lead.
+
+Two rules that fall out of it, both from the operator, 2026-08-01:
+
+- **Verify by testing where a test exists**, and prefer a fresh observation to a
+  remembered one. When asserting a threshold, **test both sides of it** — F-040
+  generalised "under 512 bytes is safe" from the only two samples that sat on the
+  boundary (INDEX A-16).
+- **A confirmed fact must link to its evidence**, so it is never relitigated: a
+  capture file, a **commit-pinned** source permalink (line numbers rot), or an
+  external URL. `scripts/check-docs.py` fails on a fact row with no evidence at
+  all (`NO-CITATION`); it cannot judge whether the citation is *good*, so that
+  part is on you. `specification/mqtt.stf` is a hand-maintained reverse-engineering artifact;
 `libflagship/mqtt.py` is generated from it and says "DO NOT EDIT" because a tool
 wrote it, not because anyone verified it.
 

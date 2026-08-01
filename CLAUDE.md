@@ -18,6 +18,23 @@
   source, captured official-app traffic, and supervised observation are. Full
   hierarchy in [`documentation/method.md`](documentation/method.md).
 
+  **And neither is this repo's own documentation — including `INDEX.md` and
+  `printer-findings.md`.** They record evidence and current understanding, not
+  fact. A fact row is a claim someone wrote down, and several have been wrong:
+  F-040 was refuted by the very session that committed it. So:
+
+  - **Never promote a doc claim to fact by citing it.** Follow it to its
+    evidence — a test you can rerun, published first-party source, or a trusted
+    external doc — and cite *that*. If a row has no such backing, it is a lead.
+  - **Verify by testing where a test exists.** Prefer a fresh observation over a
+    remembered one. When asserting a threshold or boundary, **test both sides of
+    it** — F-040 generalised "under 512 bytes is safe" from the only two samples
+    that sat on the boundary (INDEX A-16).
+  - **A confirmed fact must link to its evidence**, so it is never relitigated:
+    a capture file, a pinned source permalink (pin the commit — line numbers
+    rot), or an external URL. Grade it, and say plainly when something is
+    inference rather than observation.
+
   Detail behind the index lives in
   [`documentation/printer-findings.md`](documentation/printer-findings.md);
   primary evidence in [`documentation/captures/`](documentation/captures/).

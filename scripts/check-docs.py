@@ -8,17 +8,19 @@ survived exactly as long as someone remembered it. The 2026-07-27 audit found th
 same refuted claim living in four files, and INDEX fact F-007 went stale one
 commit after the index was written. A rule nothing checks is a rule that decays.
 
-Four checks, each covering a failure mode this repo actually had:
+Five checks, each covering a failure mode this repo actually had:
 
   1. REFUTED-LEAK   a claim listed as dead in INDEX section 6 reappears in a doc
                     -- or an agent memory note -- with no correction marker near it
   2. VERIFY-ROT     a `verify` command attached to an INDEX fact no longer finds
                     anything -- the fact has drifted from the code
   3. DEAD-LINK      an INDEX link points at a file that does not exist
-  4. TIER-3-DRIFT   this repo's code changed but the fact rows describing it were
+  4. NO-CITATION    an INDEX fact row carries no evidence at all, so it cannot be
+                    followed to a test, a published source, or an external doc
+  5. TIER-3-DRIFT   this repo's code changed but the fact rows describing it were
                     not touched (advisory only; exit code unaffected)
 
-Exit 1 on any failure in checks 1-3. Check 4 warns, because it cannot know
+Exit 1 on any failure in checks 1-4. Check 5 warns, because it cannot know
 whether the change was relevant.
 
 Scope note: agent memory notes live outside the repo, under
@@ -156,6 +158,33 @@ def check_links():
     return failures
 
 
+def check_fact_citations():
+    """Every INDEX fact row must carry evidence in its last column.
+
+    The operator's rule, 2026-08-01: this repo's own documentation is evidence
+    and current understanding, never fact -- so a fact row that cites nothing
+    cannot be followed to a test, a published source, or a trusted external doc,
+    and the next session will either re-derive it or trust it blindly. F-040 was
+    refuted by the session that wrote it; a row with no locator is how that
+    becomes invisible.
+
+    Deliberately narrow: it checks the column is non-empty, not that the citation
+    is any good. A cheap check that never false-positives beats a clever one that
+    gets excluded the first time it is noisy.
+    """
+    failures = []
+    text = INDEX.read_text(encoding="utf-8")
+    for row in re.finditer(r"^\|\s*(F-\d+)\s*\|(?:.*)\|([^|]*)\|\s*$", text, re.M):
+        fact, evidence = row.group(1), row.group(2).strip()
+        if not evidence:
+            failures.append(
+                f"INDEX {fact}: no evidence in the last column. Cite a test, a "
+                f"pinned source permalink, a capture, or an external doc -- our "
+                f"own docs are not fact. CLAUDE.md 'Before diagnosing the printer'"
+            )
+    return failures
+
+
 def check_tier3_drift():
     """Advisory: code touched in this commit without touching its fact rows."""
     try:
@@ -184,7 +213,8 @@ def main():
     hard = []
     for name, fn in (("REFUTED-LEAK", check_refuted_leaks),
                      ("VERIFY-ROT", check_verify_commands),
-                     ("DEAD-LINK", check_links)):
+                     ("DEAD-LINK", check_links),
+                     ("NO-CITATION", check_fact_citations)):
         found = fn()
         hard += [f"[{name}] {f}" for f in found]
 

@@ -244,6 +244,7 @@ python scripts/check-docs.py
 | `REFUTED-LEAK` | A §6 claim reappearing in a doc **or an agent memory note**, with no correction near it |
 | `VERIFY-ROT` | A fact's verify command finding nothing — it drifted from the code |
 | `DEAD-LINK` | A pointer here going nowhere |
+| `NO-CITATION` | A fact row with **no evidence at all** in its last column — it cannot be followed to a test, a source, or an external doc |
 | `TIER-3-DRIFT` | Staged changes to `web/`/`static/`/`libflagship/` without touching this file (advisory) |
 
 It found four leaks on its first run that a manual sweep had missed, including
