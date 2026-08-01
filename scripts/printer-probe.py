@@ -79,8 +79,15 @@ class Printer:
         # The real reply lands on /ws/mqtt.
 
     def collect(self, seconds, keep):
-        """Gather /ws/mqtt messages matching keep(obj) for `seconds`."""
-        got = []
+        """Gather /ws/mqtt messages matching keep(obj) for `seconds`.
+
+        Keeps reading for the full window. A single recv timeout or unparsable
+        frame skips that frame only -- it used to `break`, which silently ended
+        the whole capture and returned a partial result indistinguishable from
+        "the printer said nothing". Anomalies are counted and reported to stderr
+        so a lossy run cannot look like a clean one.
+        """
+        got, skipped = [], 0
         ws = websocket.create_connection(f"{WS}/ws/mqtt", header=self.hdr, timeout=seconds + 2)
         end = time.time() + seconds
         while time.time() < end:
@@ -88,10 +95,18 @@ class Printer:
                 ws.settimeout(max(0.3, end - time.time()))
                 obj = json.loads(ws.recv())
             except Exception:
-                break
+                skipped += 1
+                # A timeout or a bad frame is survivable; a closed socket is not,
+                # and retrying it would busy-spin for the rest of the window.
+                if not ws.connected:
+                    break
+                continue
             if keep(obj):
                 got.append(obj)
         ws.close()
+        if skipped:
+            print(f"note: {skipped} frame(s) skipped (timeout or bad JSON) during "
+                  f"a {seconds}s capture", file=sys.stderr)
         return got
 
     def gcode(self, line, seconds=8):

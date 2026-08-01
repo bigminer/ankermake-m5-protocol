@@ -368,17 +368,43 @@ printer idle; broker log showed current PUBLISHes throughout.
 not survive the `1043` transport.** This is a new finding and it constrains a lot
 of future work.
 
-| Observation | Reply | Status |
-| --- | --- | --- |
-| `M503` returns only its **tail**, and lossily — one line arrived mangled as `echo:; Hybrid Threshol X333 Y333 Z282`, two lines merged | ~21 lines, head missing | Obs `CONFIRMED` |
-| `M204` (bare — a pure read, `M200-M205.cpp` reports and skips the `else`) truncates **mid-word** at exactly 32 chars: `"ok\n\nok\n\n+ringbuf:1,512,0\nAcceler"`. Sent three times, byte-identical each time | payload lost | Obs `CONFIRMED` |
-| `M114` as a control: payload arrives **complete**, only the trailing `+ringbuf:` suffix is cut | usable | Obs `CONFIRMED` |
+**Measured payload sizes** (instrumented raw `/ws/mqtt` capture, unfiltered):
 
-**The truncation is not ours.** `resData` appears nowhere in `libflagship/` or
-`specification/`; `ankerctl` passes the module's JSON through untouched. So a
-reply is readable only if its payload arrives *early* in the message — `M114`
-leads with data, `M204` leads with ~25 bytes of acks and loses everything after.
-**`M503` is unusable over MQTT and no amount of window-widening fixes it.**
+| Command | `resData` bytes | Integrity |
+| --- | --- | --- |
+| `M114` | 64 | complete |
+| `M913` (bare) | 164 | complete, identical across 2 runs |
+| `M115` | **512** | **head** kept, cut mid-word at `CASE_LIGHT_BRIGHTNES` |
+| `M503` | **512** | **spliced** — see below |
+
+**There is a hard 512-byte cap on the `1043` reply payload.** Under it, replies
+are complete and reproducible. At it, they are cut. Obs `CONFIRMED`.
+
+⚠️ **Over the cap, a reply is not merely truncated — it is *spliced*.** The
+`M503` frame contains exactly one discontinuity where two different points in the
+output stream meet, e.g. `echo:; Hybrid Threshold X333 Y333 Z282`, which is two
+real lines (`…Threshold:` and `echo:  M913 X333…`) joined with bytes missing.
+**The splice position drifts between runs** — successive captures read
+`Threshol` then `Threshold`, so it is a moving window, not deterministic
+corruption. Obs `CONFIRMED`.
+
+🚨 **This is the dangerous part: a spliced frame can present a syntactically
+valid line that never existed.** It does not look corrupt. Any value read from a
+reply at or near 512 bytes must be re-read with a command whose output fits under
+the cap before it is trusted.
+
+**It is not ours.** `resData` appears nowhere in `libflagship/` or
+`specification/`; `ankerctl` passes the module's JSON through untouched, and
+`json.loads` would raise on a truncated document rather than silently shorten.
+
+🔗 **Independently corroborated (Tier 2).**
+[`Ankermgmt/ankermake-m5-protocol` issue #48](https://github.com/Ankermgmt/ankermake-m5-protocol/issues/48),
+"Gcode Prompt Output Truncated": *"the output returned from the code prompt, at
+least for M503 to read settings, seems to grab a section of the middle of the
+output instead of showing the full output."* Different codebase, different
+reporter, same command, and **"a section of the middle"** independently matches
+the splice. Closed as an enhancement with **no diagnosis in the thread**, so the
+mechanism above is new. Tier 2 caveat applies: that project targets the M5.
 
 🔑 **A live confirmation of F-031 fell out of it.** Every `M204` reply begins
 `ok\n\nok\n\n` — **two** acks. That is exactly what the source predicts: `M204`
@@ -387,14 +413,59 @@ is in `ak_gcode_parse`'s early-`ok` list (`queue.cpp:457-469`) *and* in
 a second at packet level. Tier 0 agreeing with Tier 1 on a non-obvious
 prediction.
 
-✅ **What we did learn — `M4899` has not run since the last boot.** The `M503`
-tail reports **`M913 X333 Y333`**. Every `M4899` branch sets that pair
-explicitly: T0 and T1 → `X329 Y329`, T2 and T3 → `X0 Y0`
-(`M4200_M4900.cpp:248`, `:259`, `:289`, `:320`). The observed 333 is **neither**,
-so no `M4899` of any version has executed this power cycle. Combined with F-039's
-boot default, this printer is in **`LIN_ADV_VERSION_0`**. Obs `STRONG` — it is a
-deduction from one value, and no mechanism is known that would rewrite `M913`
-after an `M4899`, but none was ruled out either.
+#### 🔑 `+ringbuf:N,512,M` decoded — and the earlier reading of it was wrong
+
+```c
+MYSERIAL2.printLine("+ringbuf:%d,%d,%d\n", ring_buffer.length, BUFSIZE, is_empty);
+```
+`queue.cpp:117`. So the three fields are **queued G-code command count**,
+**`BUFSIZE`**, and **`is_empty`**. `BUFSIZE` is `512` (`Configuration_adv.h:2191`)
+and it counts **command slots, not bytes** — upstream Marlin ships `BUFSIZE 4`
+under the comment *"The ASCII buffer for serial input"*, with `MAX_CMD_SIZE` (96
+upstream, **64** here) as the per-line byte limit. Anker raised the queue depth
+128×. Tier 1 `CONFIRMED`, verified against upstream.
+
+❌ **`REFUTED`: that the `512` in `+ringbuf` is a byte-buffer size, or that the
+module returns "the last 512 bytes" of one.** A session read the two `512`s —
+`BUFSIZE` and the observed payload cap — as the same quantity and built a
+mechanism on it. They are unrelated as far as any evidence shows.
+
+⚠️ **Open question worth keeping: two independent 512s.** `BUFSIZE` is 512
+command slots; the payload cap measures 512 bytes. Nothing links them and the
+coincidence may be nothing — but it has already produced one wrong conclusion, so
+**do not assert a relationship in either direction without evidence.**
+`UNVERIFIED`.
+
+`report_buf_free_size` does **not exist in upstream Marlin** (zero hits, with a
+working control query), so it is an Anker addition and no upstream documentation
+covers it.
+
+✅ **Practical upshot — this is telemetry we have been discarding.** `+ringbuf`
+reports **how many commands are still queued and whether the queue is empty**.
+That is drain evidence, which is exactly what F-021 says a jog can be confirmed
+to. Tracked as issue #33; see the "Transport quick reference" note below, which
+previously said only to ignore it.
+
+✅ **`M4899` has not run since the last boot.** Every `M4899` branch sets the
+hybrid threshold explicitly: T0/T1 → `X329 Y329`, T2/T3 → `X0 Y0`
+(`M4200_M4900.cpp:248`, `:259`, `:289`, `:320`). This machine reports **333**,
+which is neither — and is also not the compile-time default of `329`
+(`Configuration_adv.h:2924`). So no `M4899` of any version has executed this
+power cycle, and with F-039's boot default this printer is in
+**`LIN_ADV_VERSION_0`**.
+
+**Upgraded to Obs `CONFIRMED`.** It was first read off the `M503` frame *at the
+splice point*, which made it worthless. It was then re-read with **bare `M913`**
+— 164 bytes, under the cap, complete, byte-identical across two runs:
+
+```
+X stealthChop max speed: 333
+Y stealthChop max speed: 333
+```
+
+That is the independent, unspliced confirmation. **This is the method the splice
+finding demands: any value from an over-cap reply must be re-read below the cap
+before it is trusted.**
 
 ⚠️ **The hybrid-state risk is still open, and one number now points at it.** The
 compile-time default is `X_HYBRID_THRESHOLD 329` (`Configuration_adv.h:2924`).
@@ -502,7 +573,8 @@ plutil -extract EnvironmentVariables.ANKERCTL_TOKEN raw -o - \
 | Playwright screenshots vanish | They land in the **repo root**, not the output dir. Move them out; keep the worktree clean. |
 | `ankerctl mqtt monitor` fails to connect | It dials cloud (`make-mqtt.ankermake.com`). The printer is on the **local broker**. Use the running service's websockets instead. |
 | Printer silent right after a power cycle | Needs 30–60s to rejoin the `M5C-Local` hotspot. Silence ≠ a result. `ping` the hotspot lease first. |
-| Replies carry a `+ringbuf:N,512,M` suffix | Anker-specific. Ignore it when parsing. |
+| Replies carry a `+ringbuf:N,512,M` suffix | Anker-specific (absent from upstream Marlin). **Do not ignore it — decode it.** `N` = queued command count, `512` = `BUFSIZE` command slots, `M` = `is_empty`. It is drain telemetry, not noise (`queue.cpp:117`; issue #33). |
+| A reply may be **capped at 512 bytes and spliced** | Over the cap, two points in the output stream are joined and can form a line that never existed. Re-read any such value with a command whose output fits under the cap. F-040. |
 | **Sends fail *silently* when ankerctl is wedged** | No error, no timeout, no clue. Confirm telemetry is flowing *before* sending. `2026-07-15 01:25` |
 | "The printer is silent" means **ankerctl**, not the printer | `REFUTED` as a general rule on 2026-07-19. It described the 2026-07-15 wedge, but a later print lost the printer's broker client and hotspot neighbor while `ankerctl` and the local stack stayed healthy. Check the broker log first and branch on whether printer PUBLISHes continue. |
 
