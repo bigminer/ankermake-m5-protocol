@@ -368,17 +368,31 @@ printer idle; broker log showed current PUBLISHes throughout.
 not survive the `1043` transport.** This is a new finding and it constrains a lot
 of future work.
 
-**Measured payload sizes** (instrumented raw `/ws/mqtt` capture, unfiltered):
+**Measured payload sizes.** Raw evidence:
+[`captures/2026-08-01-gcode-reply-truncation-probe.jsonl`](captures/2026-08-01-gcode-reply-truncation-probe.jsonl)
+— every reply below, verbatim, each command run 2–4 times.
 
-| Command | `resData` bytes | Integrity |
-| --- | --- | --- |
-| `M114` | 64 | complete |
-| `M913` (bare) | 164 | complete, identical across 2 runs |
-| `M115` | **512** | **head** kept, cut mid-word at `CASE_LIGHT_BRIGHTNES` |
-| `M503` | **512** | **spliced** — see below |
+| Command | `resLen` | Ends `ok\n` | Complete |
+| --- | --- | --- | --- |
+| `M92` | 32 | ✗ | ✗ cut mid-line |
+| `M204` | 32 | ✗ | ✗ cut mid-word |
+| `M851` | 45 | ✓ | ✅ |
+| `M114` | 64 | ✗ | ✗ cut inside `+ringbuf` |
+| `M119` | 108 | ✓ | ✅ |
+| `M913` | 164 | ✓ | ✅ |
+| `M115` | **512** | ✗ | ✗ head kept, cut at the ceiling |
+| `M503` | **512** | ✗ | ✗ head lost **and spliced** |
 
-**There is a hard 512-byte cap on the `1043` reply payload.** Under it, replies
-are complete and reproducible. At it, they are cut. Obs `CONFIRMED`.
+❌ **`REFUTED` — "there is a hard 512-byte cap; under it replies are complete."**
+Written into this section on 2026-07-31 and refuted on 2026-08-01 by the same
+session, on wider testing. `M92` and `M204` truncate at **32 bytes** and `M114`
+at **64** — all far under 512. **`resLen` predicts nothing**: `M851` (45) and
+`M119` (108) are complete while `M114` (64) is not. The generalisation came from
+the only two samples that happened to sit at the boundary (INDEX A-16).
+
+**512 is the ceiling, not the rule.** It was never exceeded across five runs of
+the two long-output commands, so it is real as a maximum — but most truncation
+happens well below it.
 
 ⚠️ **Over the cap, a reply is not merely truncated — it is *spliced*.** The
 `M503` frame contains exactly one discontinuity where two different points in the
@@ -389,9 +403,34 @@ real lines (`…Threshold:` and `echo:  M913 X333…`) joined with bytes missing
 corruption. Obs `CONFIRMED`.
 
 🚨 **This is the dangerous part: a spliced frame can present a syntactically
-valid line that never existed.** It does not look corrupt. Any value read from a
-reply at or near 512 bytes must be re-read with a command whose output fits under
-the cap before it is trusted.
+valid line that never existed.** It does not look corrupt.
+
+#### ✅ The rule that actually works: check the terminator
+
+**A `1043` reply is complete iff `resData` ends with `` `ok\n` ``.** It holds on
+all eight commands in the capture — including `M851` and `M119`, which were
+**predicted complete before being run**, then confirmed.
+
+This is not a heuristic we invented. `ok` is the per-command acknowledgement of
+the standard G-code serial handshake:
+
+- [RepRap G-code reference](https://reprap.org/wiki/G-code) — the host waits for
+  `ok` after each line. It also documents the buffered/unbuffered split that
+  F-031 found in `ak_gcode_parse`: buffered commands are *"acknowledged as soon
+  as received"*, unbuffered ones *"not acknowledged to the host until the buffer
+  is exhausted and then the command has been executed."* So F-031 is standard
+  protocol, not an Anker quirk.
+- [`STR_OK` = `"ok"`](https://github.com/eufymake/eufyMake-Marlin-M5C/blob/3eacc74d11069c704bcb75ab1146461fcda0084f/release_marlin2.0/Marlin/src/core/language.h#L114),
+  emitted by `ok_to_send()`
+  ([`queue.cpp:261`](https://github.com/eufymake/eufyMake-Marlin-M5C/blob/3eacc74d11069c704bcb75ab1146461fcda0084f/release_marlin2.0/Marlin/src/gcode/queue.cpp#L261)).
+
+⚠️ **Necessary, not proven sufficient.** A truncation landing exactly after a
+*non-final* `ok` would pass the check while losing payload. `M204`'s reply
+*contains* two `ok`s and is still truncated — so **"contains `ok`" is definitely
+not the test; "ends with" is.** Treat it as a strong filter, not a proof, and
+prefer a semantic check too (are all expected fields present?).
+
+`scripts/printer-probe.py` warns when a reply fails this check.
 
 **It is not ours.** `resData` appears nowhere in `libflagship/` or
 `specification/`; `ankerctl` passes the module's JSON through untouched, and

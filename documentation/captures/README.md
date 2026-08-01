@@ -7,7 +7,14 @@ trust. Per [`../method.md`](../method.md) this is Tier 0: direct observation of
 this machine.
 
 Recorded with [`scripts/capture-mqtt.py`](../../scripts/capture-mqtt.py), which
-only listens on `/ws/mqtt`. Nothing in a capture session is sent to the printer.
+only listens on `/ws/mqtt`. Nothing in a passive capture session is sent to the
+printer.
+
+⚠️ **One file here is an *active read* session, not a passive capture** —
+[`2026-08-01-gcode-reply-truncation-probe.jsonl`](2026-08-01-gcode-reply-truncation-probe.jsonl).
+It sent commands, each verified read-only against published firmware source
+before sending. It is marked as such in its first record. Do not treat it as
+evidence of what the printer volunteers unprompted.
 
 ## Format
 
@@ -63,6 +70,24 @@ Model was a small functional part in PLA, 43 layers, ~14 minutes.
 | `1052` and `1037` are sent once at job start | part 1, early |
 | Preheat matched the slicer profile: nozzle 150 → 220, bed 60 | `1003`/`1004` targets |
 | Cooldown to nozzle 38C / bed 46C with targets 0 | part 2, tail |
+
+---
+
+## `2026-08-01-gcode-reply-truncation-probe.jsonl`
+
+**Active read session** (see the warning above). Eight G-code reads, each
+repeated 2–4 times, recording the complete `1043` reply and whether it was
+truncated. This is the primary evidence for INDEX F-040, F-041 and F-043.
+
+| Observation | Where to look |
+| --- | --- |
+| **A reply is complete iff `resData` ends with `ok\n`** — holds on all 8 | `_ends_with_ok` vs `_semantically_complete` |
+| **`resLen` does not predict completeness** — `M851` (45) and `M119` (108) complete; `M114` (64) truncated | compare `resLen` across records |
+| **512 is the ceiling, never exceeded** — but most truncation is far below it | `M115`, `M503` |
+| **Over the ceiling, replies are *spliced*, not just cut** | `M503` `_note` |
+| The splice **drifts between runs** | `M503` `_identical_across_runs: false` |
+| Byte loss is proven, not a firmware quirk | one `M503` frame holds both `echo:; PID settings:` and `; Controller Fan` |
+| `M913` is the sole evidence for F-041 | `M913` record |
 
 ### Useful one-liners
 

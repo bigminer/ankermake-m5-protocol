@@ -124,6 +124,26 @@ class Printer:
         return [str(o.get("resData", "")) for o in out]
 
 
+def warn_if_truncated(replies):
+    """A 1043 reply is complete only if it ends with the `ok` acknowledgement.
+
+    Truncation happens at *any* length -- 32 and 64 bytes both observed -- so a
+    short reply is not a safe reply, and resLen tells you nothing. `ok` is the
+    per-command ack of the standard G-code handshake (reprap.org/wiki/G-code),
+    so its absence means the response is still in flight or was dropped.
+    See INDEX F-043; evidence in
+    documentation/captures/2026-08-01-gcode-reply-truncation-probe.jsonl.
+
+    Necessary, not sufficient: a cut landing just after a non-final `ok` would
+    slip through. Check the fields you expected are actually present.
+    """
+    if not replies:
+        return
+    if not replies[-1].rstrip("\r\n").endswith("ok"):
+        print("warning: reply does not end with 'ok' -- it is probably TRUNCATED. "
+              "Do not trust values read from it (INDEX F-043).", file=sys.stderr)
+
+
 def cmd_pos(p):
     for r in p.gcode("M114"):
         m = POS_RE.search(r)
@@ -205,8 +225,10 @@ def main():
         for pat, why in DANGEROUS:
             if pat.search(line):
                 sys.exit(f"refused: {why}\nsee documentation/printer-findings.md")
-        for r in p.gcode(line):
+        replies = p.gcode(line)
+        for r in replies:
             print(r.strip())
+        warn_if_truncated(replies)
     else:
         sys.exit(__doc__)
 
