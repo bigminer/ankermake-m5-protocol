@@ -623,11 +623,12 @@ def test_fan_setting_requires_fresh_state_and_never_confirms_from_ack(tmp_path):
     assert outcome.reason == "confirmation_unavailable"
 
 
-def test_fan_setting_bounds_and_stale_state_are_rejected(tmp_path):
+def test_fan_setting_bounds_and_invalidated_state_are_rejected(tmp_path):
     clock = FakeClock()
     snapshots = PrinterSnapshots(clock=clock)
     snapshots.observe("printer-0", {"state": "idle"})
     clock.now += 16
+    snapshots.invalidate_on_change("printer-0")
     protocol = RecordingProtocol()
     actions = PrinterActions(
         snapshots=snapshots,
@@ -827,11 +828,19 @@ def test_protective_stop_leaves_a_pending_fan_setting_alone(tmp_path):
     assert fan.reason == "confirmation_unavailable"
 
 
-def test_stopping_the_fan_stays_available_when_state_is_stale(tmp_path):
+def test_protective_heater_off_and_fan_zero_remain_available_when_telemetry_degrades(tmp_path):
     clock = FakeClock()
     snapshots = PrinterSnapshots(clock=clock)
-    snapshots.observe("printer-0", {"state": "idle"})
+    snapshots.observe(
+        "printer-0",
+        {
+            "state": "idle",
+            "nozzle": {"current": 2000},
+            "bed": {"current": 2100},
+        },
+    )
     clock.now += 16
+    snapshots.invalidate_on_change("printer-0")
     protocol = RecordingProtocol()
     actions = PrinterActions(
         snapshots=snapshots,
@@ -847,11 +856,19 @@ def test_stopping_the_fan_stays_available_when_state_is_stale(tmp_path):
     stopping = actions.submit(
         ActionRequest("fan-0", "printer-0", FanSetting(percent=0))
     )
+    heaters_off = actions.submit(
+        ActionRequest("heaters-off", "printer-0", HeaterOff(heater="all"))
+    )
 
     assert raising.status == "rejected"
     assert raising.reason == "fresh_printer_state_required"
     assert stopping.status == "accepted"
-    assert protocol.effects == [("gcode", "printer-0", "M107")]
+    assert heaters_off.status == "accepted"
+    assert protocol.effects == [
+        ("gcode", "printer-0", "M107"),
+        ("gcode", "printer-0", "M104 S0"),
+        ("gcode", "printer-0", "M140 S0"),
+    ]
 
 
 def test_a_new_fan_setting_supersedes_the_pending_one(tmp_path):

@@ -295,15 +295,16 @@ Protective, and fan requests become indeterminate. ⚠️ **The stated reason �
 The printer *does* report fan state, as `1005`, published on change; it was
 observed at 99 mid-print and 0 at completion. Fan requests are indeterminate
 because **ankerctl sends raw `M106`**, which the communication module never
-learns about (`REPORT_FAN_CHANGE` is compiled out), and because `normalize()`
-has no `1005` branch. A defect in our implementation, not a protocol limit.
+learns about (`REPORT_FAN_CHANGE` is compiled out). The `1005` fact is tracked,
+but this path does not cause a new observation, so the action remains
+`indeterminate/confirmation_unavailable` (INDEX F-007/F-022).
 See [`INDEX.md`](INDEX.md) F-003, F-022.
 
 Two rules keep the safe direction reachable when telemetry degrades. Every
 Protective command — heater-off for any heater, and a fan request of 0% —
-skips the freshness gate, so shutting something down stays available exactly
-when state has gone stale; only raising a heater target or fan speed requires a
-fresh fact. A Protective Stop also supersedes any pending nozzle or bed target
+skips the freshness gate, so shutting something down stays available when
+telemetry is unknown or stale; only raising a heater target or fan speed
+requires a fresh fact. A Protective Stop also supersedes any pending nozzle or bed target
 with `protective_stop_submitted`, because the Stop drives both targets to 0 and
 a pending target could otherwise decay into a `confirmation_timeout` that reads
 as a failure of the Stop itself. A pending fan request is deliberately left
@@ -341,8 +342,9 @@ resolution and well inside the printer's own ~1.3C inter-sensor spread. The run
 also reconfirmed supersession, independent coordination, and Protective
 all-heaters-off, and validated Protective fan-off under stale state.
 
-The fan half remains bounded by the protocol, not by the fixture. Fan speed has
-no telemetry, so a fan request can only ever reach
+The fan half remains bounded by the action path, not by the fixture. Although
+fan speed is reported as `1005`, raw `M106` requests do not update the module
+state, so a fan request can only ever reach
 `indeterminate/confirmation_unavailable`; the 2026-07-26 run established
 attributable physical observations by first turning the heaters off and waiting
 for the operator to confirm silence, because the firmware runs its own hotend
@@ -350,10 +352,10 @@ fan while the nozzle is hot. Any future fan evidence must use that silent
 baseline or it is not attributable.
 
 That run also established two operating conditions that any later validation
-must account for: the M5C never publishes `state` (it answers only
-`APP_QUERY_STATUS`, so state is stale within 15 seconds of a poll), and the lazy
-MQTT service ages facts between short-lived connections, so a warm-up read is
-required immediately before submitting an action.
+must account for: the M5C never pushes `state` (it answers only
+`APP_QUERY_STATUS`), and the lazy MQTT service invalidates on-change facts at
+connection/session boundaries. `state` remains fresh between polls in a session;
+cadence facts still age by elapsed time. See INDEX F-008.
 
 ## Expected Live Flow
 

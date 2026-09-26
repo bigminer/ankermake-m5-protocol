@@ -516,6 +516,43 @@ def test_validation_mode_pause_uses_named_action_and_renders_pending_state(
     assert "awaiting" in page.locator("#print-action-status").inner_text().lower()
 
 
+def test_on_change_fan_fact_renders_its_value_and_observation_age(
+    page, live_http_server
+):
+    _login(page, live_http_server)
+    page.click("#control-tab")
+    page.evaluate(
+        """
+        window.__wsInstances.find((ws) => ws.url.includes("/ws/state")).emit({
+            cursor: 1,
+            state: "printing",
+            fan: 99,
+            facts: {
+                state: {
+                    value: "printing",
+                    observedAt: Math.floor(Date.now() / 1000) - 12 * 60,
+                    freshness: "fresh",
+                    kind: "on_change",
+                },
+                fan: {
+                    value: 99,
+                    observedAt: Math.floor(Date.now() / 1000) - 12 * 60,
+                    freshness: "fresh",
+                    kind: "on_change",
+                },
+            },
+        });
+        """
+    )
+
+    text = page.locator("#fan-observation").inner_text()
+    assert "Fan 99%" in text
+    assert "observed 12 minutes ago" in text
+    state = page.locator("#state-observation").inner_text()
+    assert "State printing" in state
+    assert "observed 12 minutes ago" in state
+
+
 def test_validation_mode_thermal_and_fan_controls_use_named_actions(
     page, live_http_server, configured_app
 ):

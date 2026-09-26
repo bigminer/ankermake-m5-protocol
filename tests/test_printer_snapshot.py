@@ -36,7 +36,7 @@ def test_watch_delivers_current_snapshot_then_monotonic_updates():
     assert update.facts["print.progress"].value == 1200
 
 
-def test_each_fact_expires_independently_and_emits_a_snapshot_update():
+def test_on_change_state_stays_fresh_while_cadence_temperature_expires():
     clock = FakeClock()
     snapshots = PrinterSnapshots(clock=clock, fresh_for=15)
     watcher = snapshots.watch(Watch(printer_id="printer-0"))
@@ -55,10 +55,57 @@ def test_each_fact_expires_independently_and_emits_a_snapshot_update():
 
     clock.now += 6
     snapshots.tick()
-    stale_update = next(watcher)
-    assert stale_update.cursor == temperature_update.cursor + 1
-    assert stale_update.facts["state"].freshness == "stale"
-    assert stale_update.facts["nozzle.current"].freshness == "fresh"
+    still_fresh = next(snapshots.watch(Watch("printer-0")))
+    assert still_fresh.facts["state"].freshness == "fresh"
+    assert still_fresh.facts["nozzle.current"].freshness == "fresh"
+
+    clock.now += 10
+    snapshots.tick()
+    expired_update = next(watcher)
+    assert expired_update.facts["state"].freshness == "fresh"
+    assert expired_update.facts["nozzle.current"].freshness == "stale"
+
+
+def test_disconnect_invalidates_on_change_facts_but_keeps_cadence_values():
+    clock = FakeClock()
+    snapshots = PrinterSnapshots(clock=clock, fresh_for=15)
+    watcher = snapshots.watch(Watch("printer-0"))
+    next(watcher)
+    snapshots.observe(
+        "printer-0",
+        {"state": "printing", "fan": 99, "nozzle": {"current": 22000}},
+    )
+    observed = next(watcher)
+    assert observed.facts["state"].kind == "on_change"
+    assert observed.facts["fan"].kind == "on_change"
+    assert observed.facts["nozzle.current"].kind == "cadence"
+
+    clock.now += 12 * 60
+    snapshots.tick()
+    aged = next(watcher)
+    assert aged.facts["state"].freshness == "fresh"
+    assert aged.facts["fan"].freshness == "fresh"
+    assert aged.facts["nozzle.current"].freshness == "stale"
+
+    snapshots.invalidate_on_change("printer-0")
+    disconnected = next(watcher)
+    for path in ("state", "fan"):
+        assert disconnected.facts[path].value is None
+        assert disconnected.facts[path].observed_at is None
+        assert disconnected.facts[path].freshness == "unknown"
+    assert disconnected.facts["nozzle.current"].freshness == "stale"
+
+
+def test_restarted_snapshot_store_does_not_replay_on_change_facts():
+    clock = FakeClock()
+    previous = PrinterSnapshots(clock=clock)
+    previous.observe("printer-0", {"state": "printing", "fan": 99})
+
+    restarted = PrinterSnapshots(clock=clock)
+    current = next(restarted.watch(Watch("printer-0")))
+
+    assert current.facts["state"].freshness == "unknown"
+    assert current.facts["fan"].freshness == "unknown"
 
 
 def test_watch_resumes_without_gaps_or_duplicate_logical_updates():
@@ -111,11 +158,13 @@ def test_snapshot_serialization_keeps_the_legacy_state_shape_with_fact_metadata(
         "value": "job.gcode",
         "observedAt": 100.0,
         "freshness": "fresh",
+        "kind": "cadence",
     }
     assert payload["facts"]["bed.current"] == {
         "value": None,
         "observedAt": None,
         "freshness": "unknown",
+        "kind": "cadence",
     }
 
 

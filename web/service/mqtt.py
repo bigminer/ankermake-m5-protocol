@@ -11,6 +11,8 @@ import cli.mqtt
 class MqttQueue(Service):
 
     def worker_start(self):
+        printer_id = f"printer-{app.config['printer_index']}"
+        app.printer_snapshots.invalidate_on_change(printer_id)
         self.transport = cli.mqtt.mqtt_transport(
             app.config["config"],
             app.config["printer_index"],
@@ -35,8 +37,12 @@ class MqttQueue(Service):
             app.printer_actions.tick()
 
     def worker_stop(self):
+        printer_id = f"printer-{app.config['printer_index']}"
         try:
             self.transport.disconnect()
         except Exception as E:
             log.warning(f"{self.name}: Failed to disconnect mqtt transport ({E})")
-        del self.transport
+        finally:
+            app.printer_snapshots.invalidate_on_change(printer_id)
+            if hasattr(self, "transport"):
+                del self.transport

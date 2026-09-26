@@ -133,11 +133,11 @@ Verify the gate before and after: a named action must return
 
 Three conditions waste runs — all three have already cost one:
 
-- **The M5C never publishes `state`.** It exists only as an `APP_QUERY_STATUS`
-  reply and is stale 15s later, so an action with a freshness gate fails unless
-  status was polled immediately before.
-- **The lazy MQTT service ages facts between connections.** Warm-up `/ws/state`
-  read immediately before submitting.
+- **The M5C never pushes `state`.** It exists only as an `APP_QUERY_STATUS`
+  reply and stays fresh until disconnect or service restart invalidates the
+  observation session. Polling refreshes it; see INDEX F-008.
+- **Cadence facts age between MQTT observations; on-change facts are invalidated
+  at connection/session boundaries.** Poll/read again after reconnect.
 - **Physical observations need a baseline.** A fan observation with a hot hotend
   is unattributable — the firmware runs its own hotend fan above a threshold.
   Cool down and confirm silence first.

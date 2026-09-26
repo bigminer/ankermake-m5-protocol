@@ -278,7 +278,7 @@ def test_unconfirmed_print_start_becomes_indeterminate(world):
 @pytest.mark.parametrize(
     "observation, reason",
     [
-        ({}, "fresh_printer_state_required"),
+        ({}, "fresh_bed_temperature_required"),
         ({"state": "printing"}, "idle_printer_required"),
     ],
 )
@@ -287,7 +287,7 @@ def test_policy_rejects_before_any_physical_effect(world, observation, reason):
     if observation:
         snapshots.observe("printer-0", observation)
     else:
-        clock.now += 60  # every fact goes stale
+        clock.now += 60  # cadence temperatures expire; on-change state stays fresh
     actions = build(
         world["tmp_path"], clock, snapshots,
         protocol=world["protocol"], transfers=world["transfers"],

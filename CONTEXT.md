@@ -45,6 +45,18 @@ _Avoid_: Attended action, permanent supervision
 The latest set of facts observed about a printer, including when each fact was observed. A snapshot may contain stale or unknown facts and does not by itself prove the printer's current physical state.
 _Avoid_: Live state, current state
 
+**Publication semantics**:
+The way a fact is published, recorded as either an on-change fact or a cadence fact. An on-change fact remains fresh until a newer observation or connection/session invalidation; a cadence fact becomes stale after its configured freshness interval.
+_Avoid_: Update frequency
+
+**On-change fact**:
+A fact published only when its value changes, which remains fresh until superseded or invalidated by a connection/session boundary.
+_Avoid_: Stale-on-change fact
+
+**Cadence fact**:
+A fact published on a recurring cadence, which becomes stale when its configured freshness interval elapses without another observation.
+_Avoid_: Periodic fact
+
 **Staged artifact**:
 An upload the server has taken custody of, named by an opaque reference and described only by metadata the server derived itself. The reference identifies the artifact without disclosing its contents or the path it came from.
 _Avoid_: File, upload, path

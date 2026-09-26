@@ -11,27 +11,28 @@ from threading import Condition
 import time
 
 
-FACT_PATHS = (
-    "state",
-    "nozzle.current",
-    "nozzle.target",
-    "bed.current",
-    "bed.target",
-    "print.name",
-    "print.user_name",
-    "print.origin",
-    "print.elapsed",
-    "print.remaining",
-    "print.progress",
-    "print.img",
-    "print.layer.current",
-    "print.layer.total",
-    "speed",
-    # Fan speed, percent, from commandType 1005.  ⚠️ The printer publishes this
-    # on *change* only, so the fact reads "stale" for most of a print while
-    # remaining accurate -- the same shape of problem as `state`.  Do not gate an
-    # action on `fan` freshness without reading documentation/INDEX.md F-003.
-    "fan",
+FACT_PATHS = {
+    "state": "on_change",
+    "nozzle.current": "cadence",
+    "nozzle.target": "cadence",
+    "bed.current": "cadence",
+    "bed.target": "cadence",
+    "print.name": "cadence",
+    "print.user_name": "cadence",
+    "print.origin": "cadence",
+    "print.elapsed": "cadence",
+    "print.remaining": "cadence",
+    "print.progress": "cadence",
+    "print.img": "cadence",
+    "print.layer.current": "cadence",
+    "print.layer.total": "cadence",
+    "speed": "cadence",
+    # Fan speed, percent, from commandType 1005, is published on change only
+    # (INDEX F-003).
+    "fan": "on_change",
+}
+ON_CHANGE_FACTS = frozenset(
+    path for path, kind in FACT_PATHS.items() if kind == "on_change"
 )
 
 
@@ -46,6 +47,7 @@ class Fact:
     value: object = None
     observed_at: float | None = None
     freshness: str = "unknown"
+    kind: str = "cadence"
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,7 @@ class Snapshot:
                     "value": fact.value,
                     "observedAt": fact.observed_at,
                     "freshness": fact.freshness,
+                    "kind": fact.kind,
                 }
                 for path, fact in self.facts.items()
             },
@@ -135,6 +138,18 @@ class PrinterSnapshots:
         with self._condition:
             self._state(printer_id)
 
+    def invalidate_on_change(self, printer_id):
+        """Forget change-published facts when their observation session ends."""
+        with self._condition:
+            state = self._state(printer_id)
+            invalidated = False
+            for path in ON_CHANGE_FACTS:
+                if state["values"][path] != (None, None):
+                    state["values"][path] = (None, None)
+                    invalidated = True
+            if invalidated:
+                self._publish(printer_id, state, self._clock())
+
     def remember_job(self, printer_id, file_name, user_name, origin):
         """Retain trusted upload identity until matching job telemetry arrives."""
         with self._condition:
@@ -187,11 +202,14 @@ class PrinterSnapshots:
         for path, (value, observed_at) in state["values"].items():
             if observed_at is None:
                 freshness = "unknown"
-            elif now - observed_at <= self._fresh_for:
+            elif (
+                FACT_PATHS[path] == "on_change"
+                or now - observed_at <= self._fresh_for
+            ):
                 freshness = "fresh"
             else:
                 freshness = "stale"
-            facts[path] = Fact(value, observed_at, freshness)
+            facts[path] = Fact(value, observed_at, freshness, FACT_PATHS[path])
         return Snapshot(printer_id, state["cursor"], facts, dict(state["actions"]))
 
     def _publish(self, printer_id, state, now):

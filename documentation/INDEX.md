@@ -25,7 +25,7 @@ If your next move appears here, the answer already exists. Do not derive it.
 | reason about `M119`'s `z_probe: open` | Meaningless — **the probe is not on that pin.** Strain gauge, nozzle board, UART | F-014 |
 | capture MQTT to learn what the module sends Marlin | **Impossible.** The module never originates a `1043` — the only ones present are replies to polls we sent. That link is invisible | F-006 |
 | plan to observe `+ringbuf` from a passive print capture | **You will find nothing.** It rides only on `1043` replies, and those exist only when *we* send a command. Drive it, don't watch for it | F-042, #33 |
-| add a "fresh state" gate to any action | The M5C **never pushes `state`**. It is stale 15s after a poll. This has broken two actions already | §5 |
+| add a "fresh state" gate to any action | The M5C **never pushes `state`**; it is an on-change fact from `APP_QUERY_STATUS` replies and stays fresh until the service invalidates its session. See F-008 | §5 |
 | use a `1001` field as seconds, or as a countdown | **Units differ per field.** `time` is **milliseconds** and re-estimates upward as well as down; `totalTime` is an estimate before the print and elapsed seconds during it; `progress` is hundredths of a percent | F-044 |
 | send an opcode we have never sent | Its payload is unknown and **there is no convention to infer from** — 4 shapes across 3 opcodes | §5 |
 | conclude `print_start` sends `G36` ungated | **It does not.** `ANKERCTL_PREPRINT_G36` gates it via `extract_temperatures` at `web/__init__.py:776` — no temps, no `bed_celsius`, no preparation. An audit got this wrong by reading `printer_actions.py` alone | A-09, issue #25 |
@@ -94,7 +94,7 @@ new claims (A-05).
 | F-005 | States: `0` idle · `1` printing · `4` **finished or stopped** · `8` preparing (~123s). Obs `CONFIRMED` | `grep '"commandType":1000' documentation/captures/*.jsonl \| grep -oE '"value":[0-9]+' \| uniq -c` |
 | F-006 | **The module never *originates* a `1043`.** Its Marlin serial link is invisible over MQTT — capturing MQTT cannot show what it sends Marlin. Obs `CONFIRMED`. ⚠️ **Corrected 2026-08-01: the old wording "zero `1043` in a full print" was false against its own evidence.** `part2` contains exactly one, `resData: "ok T:36.00 /0.00 B:43.60 /0.00"` — an **`M105` reply**, i.e. an answer to a poll *our own web UI* sends ([`ankersrv.js:441`](../static/ankersrv.js#L441)), not module-originated traffic. That every `1043` present is a reply to us **strengthens** the claim; the count does not | [part2 line 1227](captures/2026-07-28-orca-print-part2.jsonl); `grep '"commandType":1043' documentation/captures/2026-07-28-orca-print-part*.jsonl` |
 | F-007 | `normalize()` maps `1000/1001/1003/1004/**1005**/1006/1052`. **Unnamed types can never become facts** — check here before concluding the printer does not report something. `1005`→`fan` wired 2026-07-28 | `grep -n 'ct ==' web/service/state.py` |
-| F-008 | **`fan` is a tracked fact** in `FACT_PATHS`. ⚠️ Published on change only, so it reads `stale` for most of a print while staying accurate — same shape as `state`. **Do not gate an action on `fan` freshness** without reading F-003 | `grep -n 'fan' web/printer_snapshot.py` |
+| F-008 | **`fan` is an on-change fact** in `FACT_PATHS`; it stays fresh until superseded or invalidated at a connection/session boundary. `state` has the same publication semantics. **Do not gate an action on `fan` freshness** without reading F-003 | `grep -n '"fan": "on_change"' web/printer_snapshot.py` |
 | F-044 | **`1001` field units, from a live ~3h print.** ⚠️ **`time` is remaining MILLISECONDS**, and it is a **live re-estimate — it rises as well as falls** (measured +443/s over 288s, so it is *not* a countdown). Rendering it raw showed **`2631:07:34`** (~110 days) for a job with ~2.6h left — fixed at `state.py` by `// 1000`. **`totalTime` is overloaded**: a pre-print *estimate* (172, revised to 191 — minutes, `Inf`), then it resets and counts **elapsed seconds** at exactly 1.00/s once printing. **`progress` is hundredths of a percent** (`10000` = 100%). `startLeftTime` sat at `1` throughout — not a countdown. Temps are hundredths of a degree (`22000` = 220.00C). Obs `CONFIRMED`; four independent estimates of total duration agreed at 2.8–3.0h, including the operator's | [capture](captures/2026-08-01-live-print-1001-fields.jsonl); `tests/test_state_normalize.py` |
 
 ### Homing
@@ -142,10 +142,12 @@ published source".
 
 ## 5. Settled — do not re-derive
 
-- **`state` is never pushed.** Only an `APP_QUERY_STATUS` reply, stale 15s later.
-  Any "fresh state" gate inherits this — it broke fan requests twice.
-- **The lazy MQTT service ages facts between connections.** Warm-up `/ws/state`
-  read immediately before submitting an action.
+- **`state` is never pushed.** It is observed only in an `APP_QUERY_STATUS`
+  reply and stays fresh until disconnect or service restart invalidates the
+  on-change facts. A poll refreshes it. Fan requests were also rejected during
+  the previous elapsed-time freshness window while temperatures remained fresh.
+- Cadence facts age between MQTT observations; on-change facts are cleared at
+  each connection/session boundary and are never replayed after restart.
 - **A fan observation with a hot hotend is unattributable** — the firmware runs
   its own hotend fan above a threshold. Establish silence cold.
 - **`/ws/ctrl` replying `{"ankerctl":1}` is not the printer.** Real replies land

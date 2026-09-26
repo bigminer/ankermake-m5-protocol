@@ -484,8 +484,8 @@ the compound action, read `M114`, send `G91` / `G1` / `G90`, send `M400`, read
 `M114` again, and confirm on the expected delta within tolerance. Nothing is
 added to `FACT_PATHS`; the snapshot stays observation-only and position never
 becomes a stale-able fact. This is the smallest change, it reuses a live-proven
-pattern, and the freshness problem that plagues `state` (`printer-findings.md:534-542`)
-never arises because the read is synchronous with the action.
+pattern, and it is independent of the `state` on-change semantics now recorded
+in INDEX F-008 because the read is synchronous with the action.
 
 Costs: the action holds a reply tap for the duration; `M400` blocks until the
 move drains, so the timeout must bound the longest permitted jog; and the
@@ -495,9 +495,8 @@ confirmation is planner-space, so the outcome string must say so honestly
 **B. Position facts in `FACT_PATHS`, fed by a polled `M114`.** Add
 `position.x/y/z` and let something poll. This is what the handoff assumed
 (`handoff.md:280-286`), and it is the option with the worst failure mode:
-position would inherit exactly the staleness pathology that `state` has, where
-"a fan request in normal operation will fail its freshness gate unless something
-polls status immediately beforehand" (`printer-findings.md:538-540`). It also
+position would inherit the cadence staleness behavior and would need its own
+polling policy. It also
 means a background poller sending G-code on a timer — and `printer-findings.md:385`
 already records that fixed-rate `M105` polling was *removed* as redundant. Adding
 a new fixed-rate poll of a *motion* command right after removing a temperature

@@ -1346,22 +1346,22 @@ surface and the heater-block body, not the polished nozzle tip.
 | `issue15-20260726-fan50-02` — fan 50% | after an explicit status poll; operator heard the fan start from a silent baseline | physical operation `CONFIRMED`; telemetry confirmation unavailable |
 | `issue15-20260726-fan0-02` — fan 0% | stale state; operator heard the fan stop | physical operation `CONFIRMED`; telemetry confirmation unavailable |
 
-**The M5C never publishes `state`.** It pushes temperatures only. The `state`
-fact exists solely as a reply to `APP_QUERY_STATUS` (1027), so it is stale
-within the 15-second freshness window of any poll. `fan50-01` was rejected for
-exactly this reason while temperatures were fresh. Consequence: **a fan request
-in normal operation will fail its freshness gate unless something polls status
-immediately beforehand.** Stale state is the M5C's default condition, not an
-edge case — which is why fan-off must bypass that gate to remain reachable.
+**The M5C never pushes `state`.** It pushes temperatures and on-change facts.
+The `state` fact exists solely as a reply to `APP_QUERY_STATUS` (1027). Under
+the snapshot implementation used during these runs, that fact expired within
+15 seconds; `fan50-01` was rejected for exactly this reason while temperatures
+were fresh. Issue #30 changes the server semantics: `state` and `fan` remain fresh
+until the observation session is invalidated. Protective fan-off continues to
+bypass freshness gates, including while facts are unknown after disconnect.
 Both fan-off requests above were accepted under naturally stale state with
 confirmed physical effect.
 
-**The lazy MQTT service ages facts between requests.** Short-lived websocket
-connections let the service stop, so the first action after an idle gap sees
-stale telemetry. This is what invalidated `nozzle40-01`. A warm-up state read
-immediately before submitting fixed it for every subsequent request. Same class
-of infrastructure artifact as the 2026-07-23 launchd reload gap: the action
-logic was never at fault in either case.
+**The lazy MQTT service stopped between requests in this run.** Short-lived
+websocket connections let the service stop, so the first action after an idle
+gap saw stale cadence telemetry. This is what invalidated `nozzle40-01`. A
+warm-up state read immediately before submitting fixed it for every subsequent
+request. Current connection/session boundaries clear on-change observations;
+cadence facts retain their elapsed-time freshness window.
 
 **A fan observation taken while the hotend is hot cannot be attributed.** The
 firmware runs its own hotend cooling fan above a temperature threshold. An early

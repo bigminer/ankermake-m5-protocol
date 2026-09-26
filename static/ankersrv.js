@@ -380,6 +380,48 @@ $(function () {
             && snapshotFacts[path].freshness === "fresh";
     }
 
+    function observedAge(observedAt) {
+        const seconds = Math.max(0, Math.floor(Date.now() / 1000 - observedAt));
+        if (seconds < 60) {
+            return "just now";
+        }
+        if (seconds < 3600) {
+            const minutes = Math.floor(seconds / 60);
+            return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+        }
+        if (seconds < 86400) {
+            const hours = Math.floor(seconds / 3600);
+            return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+        }
+        const days = Math.floor(seconds / 86400);
+        return `${days} day${days === 1 ? "" : "s"} ago`;
+    }
+
+    function updateOnChangeFacts() {
+        const stateFact = snapshotFacts?.state;
+        if (stateFact && stateFact.value !== null && stateFact.observedAt !== null) {
+            $("#state-observation").text(
+                `State ${stateFact.value} (observed ${observedAge(stateFact.observedAt)})`
+            );
+        } else {
+            $("#state-observation").text("State not observed");
+            if (stateFact) {
+                printerState = "Unknown";
+            }
+        }
+
+        const fact = snapshotFacts?.fan;
+        if (!fact || fact.value === null || fact.observedAt === null) {
+            $("#fan-observation").text("Fan state not observed");
+            return;
+        }
+        $("#fan-observation").text(
+            `Fan ${fact.value}% (observed ${observedAge(fact.observedAt)})`
+        );
+    }
+
+    window.setInterval(updateOnChangeFacts, 60000);
+
     function jobFactsAreFresh() {
         // Compatibility mode for older /ws/state producers. The server-owned
         // snapshot always supplies facts and takes over as soon as it appears.
@@ -600,6 +642,7 @@ $(function () {
             }
             if (data.facts) {
                 snapshotFacts = data.facts;
+                updateOnChangeFacts();
             }
             if (data.actions) {
                 const actions = Object.values(data.actions);
@@ -714,6 +757,7 @@ $(function () {
             requestedBedTarget = null;
             lastTelemetry = 0;
             snapshotFacts = null;
+            updateOnChangeFacts();
             updatePrinterState();
             setDisabled(["#set-nozzle-temp", "#set-bed-temp"], true);
             updateAttendedControls();

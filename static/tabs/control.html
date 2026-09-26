@@ -43,6 +43,7 @@
                     <div>
                         <div class="control-stat-label">State</div>
                         <div class="control-stat-value" id="control-printer-state">Checking…</div>
+                        <p class="small text-body-secondary mb-0" id="state-observation">State not observed</p>
                     </div>
                     <div>
                         <div class="control-stat-label">Speed</div>
@@ -182,6 +183,7 @@
                                value="0" id="fan-slider">
                         <span id="fan-value" class="text-nowrap control-stat-value">0%</span>
                     </div>
+                    <p class="small text-body-secondary mb-0 mt-2" id="fan-observation">Fan state not observed</p>
                     <button class="btn btn-secondary w-100 mt-3 control-command" id="fan-apply" type="button" disabled>
                         {{ macro.bi_icon("fan", "Set Fan") }}
                     </button>
