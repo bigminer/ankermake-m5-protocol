@@ -135,8 +135,10 @@ chmod 0600 /etc/m5c-local/certs/server.key
 SERVICE_ENV=$SERVICE_HOME/.config/ankerctl/service.env
 if [[ ! -e $SERVICE_ENV ]]; then
   umask 077
-  printf 'ANKERCTL_TOKEN=%s\nANKERCTL_SLICER_TOKEN=%s\nANKERCTL_SECRET_KEY=%s\n' \
-    "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > "$SERVICE_ENV"
+  printf '%s=%s\n%s=%s\n%s=%s\n' \
+    'ANKERCTL_TOKEN' "$(openssl rand -hex 32)" \
+    'ANKERCTL_SLICER_TOKEN' "$(openssl rand -hex 32)" \
+    'ANKERCTL_SECRET_KEY' "$(openssl rand -hex 32)" > "$SERVICE_ENV"
   chown "$SERVICE_USER:$SERVICE_USER" "$SERVICE_ENV"
 fi
 chmod 0600 "$SERVICE_ENV"
