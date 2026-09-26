@@ -18,6 +18,7 @@ All subcommands except `gcode` are reads: no motion, no heat, no job control.
 Known-dangerous commands are refused; see DANGEROUS below.
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -52,15 +53,36 @@ POS_RE = re.compile(r"X:(-?[\d.]+)\s+Y:(-?[\d.]+)\s+Z:(-?[\d.]+).*?"
                     r"Count X:(-?\d+)\s+Y:(-?\d+)\s+Z:(-?\d+)", re.S)
 
 
-def auth():
-    """Token lives in the LaunchAgent, not .env. Never printed."""
-    tok = subprocess.run(
+def _token_from_service_env():
+    """Linux/systemd deployment: EnvironmentFile ~/.config/ankerctl/service.env."""
+    path = os.path.expanduser("~/.config/ankerctl/service.env")
+    if not os.path.exists(path):
+        return ""
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("ANKERCTL_TOKEN="):
+                return line.split("=", 1)[1].strip().strip("\"'")
+    return ""
+
+
+def _token_from_launchagent():
+    """macOS deployment: token lives in the LaunchAgent, not .env."""
+    plist = os.path.expanduser(PLIST)
+    if sys.platform != "darwin" or not os.path.exists(plist):
+        return ""
+    return subprocess.run(
         ["plutil", "-extract", "EnvironmentVariables.ANKERCTL_TOKEN", "raw", "-o", "-",
-         __import__("os").path.expanduser(PLIST)],
+         plist],
         capture_output=True, text=True,
     ).stdout.strip()
+
+
+def auth():
+    """Token from the LaunchAgent (macOS) or service.env (Linux). Never printed."""
+    tok = _token_from_launchagent() or _token_from_service_env()
     if not tok:
-        sys.exit(f"could not read ANKERCTL_TOKEN from {PLIST}")
+        sys.exit("could not read ANKERCTL_TOKEN (LaunchAgent on macOS, "
+                 "~/.config/ankerctl/service.env on Linux)")
     cj = urllib.request.HTTPCookieProcessor()
     urllib.request.build_opener(cj).open(
         f"{BASE}/login", urllib.parse.urlencode({"token": tok}).encode())
