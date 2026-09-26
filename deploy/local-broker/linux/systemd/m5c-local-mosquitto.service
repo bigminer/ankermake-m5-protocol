@@ -1,0 +1,19 @@
+[Unit]
+Description=M5C local MQTT broker
+Requires=m5c-ap-ready.service
+After=m5c-ap-ready.service
+
+[Service]
+Type=simple
+User=mosquitto
+Group=mosquitto
+ExecStart=/usr/bin/mosquitto -c /etc/m5c-local/mosquitto.conf
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

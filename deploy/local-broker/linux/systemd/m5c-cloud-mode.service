@@ -1,0 +1,13 @@
+[Unit]
+Description=Enable routed Anker cloud access for the M5C
+Wants=network-online.target m5c-ap-ready.service
+After=NetworkManager.service network-online.target ufw.service m5c-ap-ready.service
+Before=m5c-local-dnsmasq.service ankerctl.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/m5c-cloud-mode apply-cloud
+
+[Install]
+WantedBy=multi-user.target

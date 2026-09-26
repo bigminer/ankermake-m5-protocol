@@ -1,0 +1,12 @@
+[Unit]
+Description=Wait for the M5C NetworkManager access point
+After=NetworkManager.service
+Requires=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bash -c 'for i in {1..120}; do /usr/bin/ip -4 -o address show dev @AP_INTERFACE@ | /usr/bin/grep -q "@AP_ADDRESS@/24" && exit 0; /usr/bin/sleep 1; done; exit 1'
+
+[Install]
+WantedBy=multi-user.target

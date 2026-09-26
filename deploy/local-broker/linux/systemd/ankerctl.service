@@ -1,0 +1,22 @@
+[Unit]
+Description=ankerctl local printer web service
+Requires=m5c-local-mosquitto.service m5c-local-dnsmasq.service
+After=network-online.target m5c-cloud-mode.service m5c-local-mosquitto.service m5c-local-dnsmasq.service
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+WorkingDirectory=@REPO_DIR@
+EnvironmentFile=@SERVICE_HOME@/.config/ankerctl/service.env
+Environment=ANKERCTL_ACTION_VALIDATION_MODE=false
+Environment=ANKERCTL_PREPRINT_G36=false
+ExecStart=@VENV_PYTHON@ @REPO_DIR@/ankerctl.py --insecure webserver run --host 0.0.0.0 --port 4470
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,8 @@
 # M5C local-broker — boot-persistent services
 
+This README documents the macOS installation. The Linux/NetworkManager
+counterpart is in [linux/README.md](linux/README.md).
+
 This directory makes the proven fully-local M5C setup survive a reboot. It
 installs four macOS **LaunchDaemons** (start at boot, no login required) that
 stand up the local broker, DNS, NTP, and pf redirect/egress that replace Anker's

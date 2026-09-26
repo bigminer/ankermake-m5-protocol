@@ -1,0 +1,13 @@
+[Unit]
+Description=M5C local NTP server
+Requires=m5c-ap-ready.service
+After=m5c-ap-ready.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/chronyd -n -x -f /etc/m5c-local/chrony.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

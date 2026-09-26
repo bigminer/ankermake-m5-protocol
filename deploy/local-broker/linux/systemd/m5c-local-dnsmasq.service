@@ -1,0 +1,14 @@
+[Unit]
+Description=M5C local DHCP and DNS
+Requires=m5c-ap-ready.service
+After=m5c-ap-ready.service m5c-cloud-mode.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/install -d -o dnsmasq -g dnsmasq -m 0750 /var/lib/m5c-local
+ExecStart=/usr/bin/dnsmasq --keep-in-foreground --conf-file=/etc/m5c-local/dnsmasq.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
