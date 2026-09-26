@@ -673,6 +673,35 @@ Do not assume the decoder or web service failed. Locate the boundary:
    direct Mac-hotspot ↔ printer radio link as the leading fault. An `ankerctl`
    restart cannot recover a remote Wi-Fi client.
 
+The same boundary can make the web UI's heater and fan controls appear inert.
+The UI refuses to send controls when its printer telemetry is stale, even if
+the control WebSocket is open. In that case, the browser reports that the
+printer is not responding and does not publish the requested command. A
+`Running` status for `mqttqueue` is not proof that its worker is still
+processing incoming messages.
+
+Check the latest broker PUBLISHes against the normalized `/ws/state` feed. If
+the broker continues receiving printer PUBLISHes but `/ws/state` facts are
+stale, restart only the webservice and reload the browser page:
+
+```sh
+launchctl kickstart -k "gui/$(id -u)/com.ankerctl.webserver"
+```
+
+Confirm that `/ws/state` facts such as `nozzle.current` and `bed.current` become
+fresh again before retrying a control. This restart restores the webservice's
+MQTT processing; it does not clear a printer-reported alarm. Check the direct
+printer status separately if an error remains.
+
+Observed 2026-09-23: Mosquitto continued receiving current printer PUBLISHes,
+while the webservice's service API still reported `mqttqueue` as `Running` and
+the `/ws/state` facts had aged stale. The UI therefore blocked heater/fan
+commands. Restarting `ankerctl` restored fresh temperature facts and the
+operator confirmed the controls worked; an Orca print upload worked afterward
+as well. A direct status query continued to report printer error
+`0xFE01030005` at level `P0`; the service restart had not cleared that
+printer-side error.
+
 On 2026-07-19 this exact second branch occurred: Mosquitto logged the printer
 client disconnecting with `Host is down`, the printer made no observed MQTT
 reconnect attempt, and a physically running print finished without further
