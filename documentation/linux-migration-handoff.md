@@ -4,12 +4,14 @@ The owner plans to repurpose the existing printer-service laptop and move the
 M5C web service and supporting broker to a different Linux host later. This is
 planning only; no service migration or printer network cutover has been done.
 
-The current Linux host runs `ankerctl.service`, `m5c-local-dnsmasq.service`,
-and `m5c-local-mosquitto.service`. The web service uses the repository checkout,
+The former Linux host previously ran `ankerctl.service`, `m5c-local-dnsmasq.service`,
+and `m5c-local-mosquitto.service`. On November 14, 2026 those services and the
+associated AP readiness, cloud-mode routing, and local NTP units were stopped and
+disabled at startup. The web service uses the repository checkout,
 a separate Python virtual environment, and a private service environment file.
 Systemd also defines AP readiness, cloud-mode routing, and local NTP units. The
 printer access point has been disabled and the host is connected to its normal
-Wi-Fi; active services alone do not establish printer connectivity. Confirm the
+Wi-Fi; printer connectivity has not been verified. Confirm the
 printer's actual network and broker connection before relying on this setup.
 
 The owner has a private backup of the service configuration, broker certificate
