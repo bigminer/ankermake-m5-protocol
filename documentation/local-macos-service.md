@@ -1,5 +1,11 @@
 # Local macOS Printer Service Runbook
 
+> **Historical deployment:** this runbook describes the retired Mac mini. The
+> current `ankerctl` host is the Linux server. For Orca, use the server's
+> reachable LAN or Tailscale address on port `4470`; use `127.0.0.1` only when
+> Orca runs on that same server. The actual server address is environment
+> specific and is not recorded here.
+
 This document describes the AnkerMake M5C service installed on Gary's Mac
 mini, including the local `ankerctl` modifications, OrcaSlicer integration,
 Tailscale access, iPad camera relay, routine operations, troubleshooting, and
@@ -351,16 +357,17 @@ safety backstop.
 Configure the printer connection as an OctoPrint-compatible host:
 
 ```text
-Host: http://127.0.0.1:4470
-API key: leave empty only when Orca runs on the Mac; otherwise use
-`ANKERCTL_SLICER_TOKEN`
+Host: http://<server-lan-or-tailscale-address>:4470
+API key: `ANKERCTL_SLICER_TOKEN` (required for Orca on another machine)
 Operation: Send and Print
 ```
 
-`127.0.0.1:4470` is the correct endpoint when Orca runs on the Mac. It is the
-`ankerctl` HTTP service, not the printer (`192.168.2.2`) or Mosquitto (`:8789`).
-The Orca connection test only requests `/api/version`; a real upload must appear
-in `ankerctl.log` as `POST /api/files/local`.
+Use `http://127.0.0.1:4470` only when Orca runs on the same machine as
+`ankerctl`. From another computer, use the Linux server's reachable LAN or
+Tailscale address and port `4470`. This is the `ankerctl` HTTP service, not the
+printer's IP or the MQTT broker. The Orca connection test only requests
+`/api/version`; a real upload must appear in `ankerctl.log` as
+`POST /api/files/local`.
 
 The saved user preset is:
 
@@ -736,8 +743,9 @@ curl http://127.0.0.1:4470/api/version
 lsof -nP -iTCP:4470 -sTCP:LISTEN
 ```
 
-Use `127.0.0.1:4470` when Orca runs on this Mac. Use the Mac's LAN or
-Tailscale address only when Orca runs on another machine.
+Use `127.0.0.1:4470` only when Orca runs on the same machine as `ankerctl`.
+Otherwise use the Linux server's reachable LAN or Tailscale address with port
+`4470`, and configure `ANKERCTL_SLICER_TOKEN` as Orca's API key.
 
 ### Printer command queue is stuck
 

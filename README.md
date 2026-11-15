@@ -111,7 +111,10 @@ walkthroughs live in [documentation/install-from-git.md](documentation/install-f
    printer dropdown.
 2. Configure the physical printer:
    - **Host Type:** `OctoPrint`
-   - **Hostname, IP or URL:** `127.0.0.1:4470` (or wherever ankerctl runs)
+   - **Hostname, IP or URL:** `127.0.0.1:4470` only when Orca runs on the
+     same machine as `ankerctl`; otherwise use the server's reachable LAN or
+     Tailscale address with port `4470` (for example,
+     `http://<server-address>:4470`).
    - **API Key:** leave empty only for a local slicer. For a remote slicer,
      set `ANKERCTL_SLICER_TOKEN` and enter that value here.
 3. Click **Test**, then **OK**.
